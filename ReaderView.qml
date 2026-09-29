@@ -3,7 +3,7 @@ import "theme.js" as T
 import "utils.js" as U
 
 // عرض الصفحتين المتجاورتين (يمين: فردي — يسار: زوجي) كما في المصحف المطبوع
-// + علامة موضع الآية + بطاقة النتيجة في الفراغ الجانبي بخط إرشادي + تلميحات التقليب عند الحاجة
+// + علامة موضع الآية + بطاقة النتيجة في الفراغ الجانبي بخط إرشادي + شرائط العلامات
 Item {
     id: root
 
@@ -12,6 +12,7 @@ Item {
     property string pagesDir: ""       // مجلد الصور
     property var found: null           // {s, sName, a, page} آية مقصودة من البحث
     property var foundPos: null        // {x, y, w, h} موضع الآية على الصورة الأصلية
+    property var bookmarks: []         // علامات الحفظ [{p, s, a}]
     readonly property int leftPage: rightPage + 1
 
     signal forward()
@@ -56,6 +57,12 @@ Item {
         if (base.indexOf("file://") === 0)
             base = base.substring(7);
         return "file://" + encodeURI(base) + "/p" + n + ".jpg";
+    }
+
+    function hasBm(p) {
+        for (var i = 0; i < root.bookmarks.length; i++)
+            if (root.bookmarks[i].p === p) return true;
+        return false;
     }
 
     // ---------- الصفحة اليمنى ----------
@@ -236,7 +243,7 @@ Item {
         color: T.panel
         border.color: T.goldSoft
         border.width: 1
-        MouseArea { anchors.fill: parent }   // تستهلك النقر حتى لا يقلب الصفحة
+        MouseArea { anchors.fill: parent }   // تستهلك النقر حتى لا تقلب الصفحة
 
         Column {
             id: col
@@ -316,8 +323,9 @@ Item {
         }
     }
 
-    // ---------- أرقام الصفحات ----------
+    // ---------- أرقام الصفحات + شرائط العلامات ----------
     Text {
+        id: rightNum
         text: U.ar(root.rightPage)
         color: T.gold
         font.family: T.fontTitle
@@ -327,6 +335,7 @@ Item {
         anchors.topMargin: 7
     }
     Text {
+        id: leftNum
         visible: root.leftPage <= root.totalPages
         text: U.ar(root.leftPage)
         color: T.gold
@@ -335,6 +344,41 @@ Item {
         anchors.horizontalCenter: leftRect.horizontalCenter
         anchors.top: leftRect.bottom
         anchors.topMargin: 7
+    }
+    // شريطة العلامة (عند حفظ الصفحة)
+    Rectangle {
+        visible: root.hasBm(root.rightPage)
+        width: 9
+        height: 13
+        radius: 2
+        color: T.gold
+        anchors.verticalCenter: rightNum.verticalCenter
+        anchors.horizontalCenter: rightNum.horizontalCenter
+        anchors.horizontalCenterOffset: 17
+        Rectangle {
+            width: 3.5; height: 3.5; radius: 1.75
+            color: T.paper
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: 2.5
+        }
+    }
+    Rectangle {
+        visible: root.leftPage <= root.totalPages && root.hasBm(root.leftPage)
+        width: 9
+        height: 13
+        radius: 2
+        color: T.gold
+        anchors.verticalCenter: leftNum.verticalCenter
+        anchors.horizontalCenter: leftNum.horizontalCenter
+        anchors.horizontalCenterOffset: 17
+        Rectangle {
+            width: 3.5; height: 3.5; radius: 1.75
+            color: T.paper
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: 2.5
+        }
     }
 
     // ---------- مناطق الضغط: اليسار = التالي، اليمين = السابق + تلميح عند الحاجة ----------

@@ -2,7 +2,7 @@ import QtQuick
 import "theme.js" as T
 import "utils.js" as U
 
-// قائمة التقسيمات: سورة / جزء / حزب / ربع / صفحة — تفتح على موضع القراءة الحالي
+// قائمة التقسيمات: سورة / جزء / حزب / ربع / صفحة / العلامات — تفتح على موضع القراءة الحالي
 Item {
     id: root
     visible: false
@@ -11,12 +11,14 @@ Item {
     property var loc: null        // نتيجة locate للصفحة الحالية
     property int currentPage: 1
     property int totalPages: 604
+    property var bookmarks: []    // علامات الحفظ
 
     signal jump(int page)
     signal closed()
+    signal bookmarkRemove(var bm)
 
-    property int tab: 0          // 0 سور 1 أجزاء 2 أحزاب 3 أرباع 4 صفحات
-    property var tabTitles: ["السور", "الأجزاء", "الأحزاب", "الأرباع", "الصفحات"]
+    property int tab: 0          // 0 سور 1 أجزاء 2 أحزاب 3 أرباع 4 صفحات 5 علامات
+    property var tabTitles: ["السور", "الأجزاء", "الأحزاب", "الأرباع", "الصفحات", "العلامات"]
     property var model: []
 
     function open() {
@@ -29,23 +31,25 @@ Item {
         root.closed();
     }
 
-    // لوحة المفاتيح: ١-٥ للتبويبات، والأسهم للتنقل بينها
+    // لوحة المفاتيح: ١-٦ للتبويبات، والأسهم للتنقل بينها
     focus: true
     Keys.onPressed: function (ev) {
-        if (ev.key >= Qt.Key_1 && ev.key <= Qt.Key_5) {
+        if (ev.key >= Qt.Key_1 && ev.key <= Qt.Key_6) {
             tab = ev.key - Qt.Key_1;
             rebuild();
             ev.accepted = true;
         } else if (ev.key === Qt.Key_Right || ev.key === Qt.Key_Down) {
-            tab = (tab + 1) % 5;
+            tab = (tab + 1) % 6;
             rebuild();
             ev.accepted = true;
         } else if (ev.key === Qt.Key_Left || ev.key === Qt.Key_Up) {
-            tab = (tab + 4) % 5;
+            tab = (tab + 5) % 6;
             rebuild();
             ev.accepted = true;
         }
     }
+
+    onBookmarksChanged: if (visible && tab === 5) rebuild()
 
     function rebuild() {
         if (!root.qdata || !root.qdata.ready) return;
@@ -71,10 +75,24 @@ Item {
                 var rb = root.qdata.nv.rub[i - 1];
                 out.push({ t: "الربع " + U.ar(i), s: "الحزب " + U.ar(Math.ceil(i / 4)) + " · الجزء " + U.ar(Math.ceil(i / 8)) + " · سورة " + root.qdata.q.surahs[rb.s - 1].name, p: rb.p, idx: i });
             }
-        } else {
+        } else if (tab === 4) {
             for (i = 1; i <= 604; i++) {
                 var lc = root.qdata.locate(i);
                 out.push({ t: "صفحة " + U.ar(i), s: lc ? ("سورة " + lc.suraName) : "", p: i, idx: i });
+            }
+        } else {
+            var bms = root.bookmarks || [];
+            for (i = 0; i < bms.length; i++) {
+                var b = bms[i];
+                var lc2 = root.qdata.locate(b.p);
+                var sub = lc2 ? ("سورة " + lc2.suraName + " · الجزء " + U.ar(lc2.juz)) : "";
+                out.push({
+                    t: "صفحة " + U.ar(b.p) + "–" + U.ar(Math.min(b.p + 1, root.totalPages)),
+                    s: b.a ? ("الآية " + U.ar(b.a) + " · " + sub) : sub,
+                    p: b.p,
+                    idx: i,
+                    bm: b
+                });
             }
         }
         root.model = out;
@@ -82,7 +100,7 @@ Item {
     }
 
     function currentIdx() {
-        if (!root.loc) return 0;
+        if (root.tab === 5 || !root.loc) return 0;
         if (tab === 0) return root.loc.suraI - 1;
         if (tab === 1) return root.loc.juz - 1;
         if (tab === 2) return root.loc.hizb - 1;
@@ -155,14 +173,14 @@ Item {
             anchors.right: parent.right
             anchors.margins: 10
             height: 40
-            spacing: 6
+            spacing: 4
             layoutDirection: Qt.RightToLeft
             Repeater {
                 model: root.tabTitles
                 delegate: Rectangle {
                     required property string modelData
                     required property int index
-                    width: (tabsRow.width - 24) / 5
+                    width: (tabsRow.width - 20) / 6
                     height: 36
                     radius: 18
                     color: root.tab === index ? T.sel : (tabMa.containsMouse ? T.selBg : "transparent")
@@ -173,7 +191,7 @@ Item {
                         text: parent.modelData
                         color: root.tab === index ? "#FFF8E8" : T.ink
                         font.family: T.fontUI
-                        font.pixelSize: 14
+                        font.pixelSize: 13
                     }
                     MouseArea {
                         id: tabMa
@@ -218,9 +236,11 @@ Item {
                 }
                 Text {
                     anchors.left: parent.left
-                    anchors.leftMargin: 14
+                    anchors.leftMargin: root.tab === 5 ? 46 : 14
                     anchors.verticalCenter: parent.verticalCenter
-                    text: parent.modelData.s + "  ·  ص " + U.ar(parent.modelData.p)
+                    width: root.tab === 5 ? parent.width - 160 : undefined
+                    elide: Text.ElideRight
+                    text: parent.modelData.s + (root.tab === 5 ? "" : ("  ·  ص " + U.ar(parent.modelData.p)))
                     color: T.inkFaint
                     font.family: T.fontUI
                     font.pixelSize: 12
@@ -235,7 +255,40 @@ Item {
                         root.close();
                     }
                 }
+                // زر إزالة العلامة (تبويب العلامات فقط)
+                Rectangle {
+                    visible: root.tab === 5
+                    width: 28; height: 28; radius: 14
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: delMa.containsMouse ? "#33A93B2E" : "transparent"
+                    Text { anchors.centerIn: parent; text: "✕"; color: delMa.containsMouse ? "#A93B2E" : T.inkFaint; font.pixelSize: 13 }
+                    MouseArea {
+                        id: delMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.bookmarkRemove(parent.parent.modelData.bm)
+                    }
+                }
             }
+        }
+
+        // رسالة فارغة لتبويب العلامات
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: tabsRow.bottom
+            anchors.topMargin: 96
+            width: parent.width - 70
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            lineHeight: 1.7
+            visible: root.tab === 5 && list.count === 0
+            text: "لا توجد علامات محفوظة بعد.\nأثناء القراءة اضغط زر «علامة» أعلى الشاشة أو Ctrl+B\nلحفظ موضعك — الصفحة أو الآية اللي واقف عندها."
+            color: T.inkFaint
+            font.family: T.fontUI
+            font.pixelSize: 14
         }
     }
 }
