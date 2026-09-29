@@ -40,6 +40,15 @@ Quran reader for Linux · Madinah Mushaf · Uthmani script · Quickshell / QML d
 
 المتطلبات: لينكس بواجهة Wayland (نوصي Hyprland)، وحزمة [Quickshell](https://quickshell.org) ‏0.3+ و Qt 6.6+.
 
+**على Arch Linux — من الـAUR** (يوفّر التحديثات تلقائيًا):
+
+```bash
+yay -S alquran    # أو أي مساعد AUR آخر
+alquran           # التطبيق يحمّل صفحات المصحف تلقائيًا عند أول تشغيل
+```
+
+**أو من المصدر مباشرة:**
+
 ```bash
 # 1) استنساخ المستودع
 git clone https://github.com/karem505/alquran.git

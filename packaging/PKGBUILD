@@ -1,0 +1,46 @@
+# Maintainer: Karem Shohoud <karem@ailigent.ai>
+pkgname=alquran
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Quran reader for desktop — Madinah Mushaf (Uthmani script), two-page spread, Arabic search, bookmarks and full index"
+arch=('any')
+url="https://github.com/karem505/alquran"
+license=('MIT')
+depends=('quickshell')
+optdepends=('ttf-qurancomplex-fonts: خطوط مجمع الملك فهد لعرض أجمل للواجهة')
+options=(!strip)
+
+source=("$pkgname-$pkgver.tar.gz::https://github.com/karem505/alquran/archive/v$pkgver.tar.gz")
+sha256sums=('b92c26a8e3e194b33386f996b0b10ee3d93db209000000000000000000000000')
+
+package() {
+  install -dm755 "$pkgdir/usr/share/$pkgname"
+  cp -r "$srcdir/$pkgname-$pkgver"/{shell.qml,Data.qml,DownloadView.qml,HeaderBar.qml,NavMenu.qml,ReaderView.qml,SearchPanel.qml,theme.js,utils.js,assets,data,tools} "$pkgdir/usr/share/$pkgname/"
+
+  install -Dm644 "$srcdir/$pkgname-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/$pkgname-$pkgver/assets/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
+
+  install -d "$pkgdir/usr/bin"
+  cat > "$pkgdir/usr/bin/$pkgname" <<'EOF'
+#!/bin/sh
+exec qs -p /usr/share/alquran/shell.qml "$@"
+EOF
+  chmod 755 "$pkgdir/usr/bin/$pkgname"
+
+  install -d "$pkgdir/usr/share/applications"
+  cat > "$pkgdir/usr/share/applications/$pkgname.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=القرآن الكريم
+Name[en]=Al-Quran
+GenericName=Quran Reader
+Comment=مصحف المدينة النبوية بالرسم العثماني — صفحتان متجاورتان، بحث وعلامات حفظ
+Exec=alquran
+Icon=alquran
+Terminal=false
+Categories=Education;Literature;Religion;
+Keywords=Quran;Qur'an;قرآن;القرآن;مصحف;الرسم العثماني;
+StartupWMClass=alquran
+StartupNotify=true
+EOF
+}
