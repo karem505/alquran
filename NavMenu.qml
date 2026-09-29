@@ -22,10 +22,29 @@ Item {
     function open() {
         visible = true;
         rebuild();
+        root.forceActiveFocus();
     }
     function close() {
         visible = false;
         root.closed();
+    }
+
+    // لوحة المفاتيح: ١-٥ للتبويبات، والأسهم للتنقل بينها
+    focus: true
+    Keys.onPressed: function (ev) {
+        if (ev.key >= Qt.Key_1 && ev.key <= Qt.Key_5) {
+            tab = ev.key - Qt.Key_1;
+            rebuild();
+            ev.accepted = true;
+        } else if (ev.key === Qt.Key_Right || ev.key === Qt.Key_Down) {
+            tab = (tab + 1) % 5;
+            rebuild();
+            ev.accepted = true;
+        } else if (ev.key === Qt.Key_Left || ev.key === Qt.Key_Up) {
+            tab = (tab + 4) % 5;
+            rebuild();
+            ev.accepted = true;
+        }
     }
 
     function rebuild() {
