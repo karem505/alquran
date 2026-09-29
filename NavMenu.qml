@@ -218,6 +218,7 @@ Item {
             model: root.model
 
             delegate: Rectangle {
+                id: bmRow
                 required property var modelData
                 required property int index
                 width: list.width
@@ -251,14 +252,15 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        root.jump(parent.modelData.p);
+                        root.jump(bmRow.modelData.p);
                         root.close();
                     }
                 }
-                // زر إزالة العلامة (تبويب العلامات فقط)
+                // زر إزالة العلامة (تبويب العلامات فقط) — فوق منطقة النقر
                 Rectangle {
                     visible: root.tab === 5
-                    width: 28; height: 28; radius: 14
+                    z: 10
+                    width: 30; height: 30; radius: 15
                     anchors.left: parent.left
                     anchors.leftMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
@@ -268,8 +270,13 @@ Item {
                         id: delMa
                         anchors.fill: parent
                         hoverEnabled: true
+                        z: 10
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.bookmarkRemove(parent.parent.modelData.bm)
+                        onPressed: function (mouse) { mouse.accepted = true; }
+                        onClicked: function (mouse) {
+                            mouse.accepted = true;
+                            root.bookmarkRemove(bmRow.modelData.bm);
+                        }
                     }
                 }
             }

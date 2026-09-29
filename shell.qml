@@ -133,7 +133,11 @@ ShellRoot {
                 currentPage: app.rightPage
                 bookmarks: app.bookmarks
                 onBookmarkRemove: function (bm) {
-                    app.bookmarks = app.bookmarks.filter(function (x) { return x !== bm; });
+                    app.bookmarks = app.bookmarks.filter(function (x) {
+                        if (x === bm) return false;
+                        if (bm && x && x.p === bm.p && x.a === bm.a) return false;
+                        return true;
+                    });
                 }
                 onJump: function (page) { app.goto(page); }
                 onClosed: reader.forceActiveFocus()
@@ -161,6 +165,10 @@ ShellRoot {
                 function gotoPage(page: int): void { app.goto(page); }
                 function openNav() { nav.open(); }
                 function navTab(i: int): void { nav.tab = i; nav.rebuild(); }
+                // اختبار: إزالة أول علامة عبر نفس مسار زر ✕ في القائمة
+                function navRemoveFirst(): void {
+                    if (nav.bookmarks.length > 0) nav.bookmarkRemove(nav.bookmarks[0]);
+                }
                 function closeAll() {
                     if (nav.visible) nav.close();
                     if (search.visible) search.close();
