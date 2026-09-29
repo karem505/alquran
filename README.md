@@ -40,14 +40,33 @@ Quran reader for Linux · Madinah Mushaf · Uthmani script · Quickshell / QML d
 
 المتطلبات: لينكس بواجهة Wayland (نوصي Hyprland)، وحزمة [Quickshell](https://quickshell.org) ‏0.3+ و Qt 6.6+.
 
-**على Arch Linux — من الـAUR** (يوفّر التحديثات تلقائيًا):
+**على Arch Linux — ثلاث طرق:**
+
+**١) حزمة جاهزة مباشرة** (الأسرع):
 
 ```bash
-yay -S alquran    # أو أي مساعد AUR آخر
-alquran           # التطبيق يحمّل صفحات المصحف تلقائيًا عند أول تشغيل
+wget -q https://github.com/karem505/alquran/releases/latest/download/alquran-1.0.0-1-any.pkg.tar.zst
+sudo pacman -U alquran-1.0.0-1-any.pkg.tar.zst
+alquran    # التطبيق يحمّل صفحات المصحف تلقائيًا عند أول تشغيل
 ```
 
-**أو من المصدر مباشرة:**
+**٢) مستودع pacman خاص** (تحديثات تلقائية مع `pacman -Syu`) — أضف إلى `/etc/pacman.conf`:
+
+```ini
+[alquran]
+SigLevel = Optional TrustAll
+Server = https://karem505.github.io/alquran/x86_64
+```
+
+ثم:
+
+```bash
+sudo pacman -Sy alquran
+```
+
+> الـAUR: ملف الحزمة (PKGBUILD) جاهز في مجلد `packaging/` وستُرفع الحزمة إلى AUR فور إعادة فتح تسجيل الحسابات الجديدة هناك.
+
+**٣) أو من المصدر مباشرة:**
 
 ```bash
 # 1) استنساخ المستودع
