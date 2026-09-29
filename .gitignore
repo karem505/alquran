@@ -1,0 +1,8 @@
+tmp/
+__pycache__/
+*.pyc
+pages/*.png
+pages/*.jpg
+pages/*.webp
+data/raw/
+*.pdf
