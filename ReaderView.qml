@@ -10,6 +10,7 @@ Item {
     property int totalPages: 604
     property string pagesDir: ""       // مجلد الصور
     property var found: null           // {sName, a, page} آية مقصودة من البحث (بطاقة سفلية)
+    property var foundPos: null        // {x, y, w, h} موضع الآية على الصورة الأصلية
     readonly property int leftPage: rightPage + 1
 
     signal forward()
@@ -61,6 +62,40 @@ Item {
             mipmap: true
             cache: false
         }
+
+        // علامة موضع الآية المقصودة
+        Item {
+            id: markR
+            visible: root.foundPos !== null && root.found !== null && root.found.page === root.rightPage
+            width: 44
+            height: 44
+            x: root.foundPos ? (root.foundPos.x / root.foundPos.w) * rightRect.width - width / 2 : 0
+            y: root.foundPos ? (root.foundPos.y / root.foundPos.h) * rightRect.height - height / 2 : 0
+            Rectangle {
+                anchors.centerIn: parent
+                width: 40
+                height: 40
+                radius: 20
+                color: "transparent"
+                border.color: T.gold
+                border.width: 2.5
+            }
+            Rectangle {
+                anchors.centerIn: parent
+                width: 54
+                height: 54
+                radius: 27
+                color: "transparent"
+                border.color: T.gold
+                border.width: 2
+                SequentialAnimation on opacity {
+                    running: markR.visible
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.65; duration: 850; easing.type: Easing.OutQuad }
+                    NumberAnimation { to: 0.0; duration: 850; easing.type: Easing.InQuad }
+                }
+            }
+        }
     }
 
     // ---------- الصفحة اليسرى ----------
@@ -87,6 +122,40 @@ Item {
             smooth: true
             mipmap: true
             cache: false
+        }
+
+        // علامة موضع الآية المقصودة
+        Item {
+            id: markL
+            visible: root.foundPos !== null && root.found !== null && root.found.page === root.leftPage
+            width: 44
+            height: 44
+            x: root.foundPos ? (root.foundPos.x / root.foundPos.w) * leftRect.width - width / 2 : 0
+            y: root.foundPos ? (root.foundPos.y / root.foundPos.h) * leftRect.height - height / 2 : 0
+            Rectangle {
+                anchors.centerIn: parent
+                width: 40
+                height: 40
+                radius: 20
+                color: "transparent"
+                border.color: T.gold
+                border.width: 2.5
+            }
+            Rectangle {
+                anchors.centerIn: parent
+                width: 54
+                height: 54
+                radius: 27
+                color: "transparent"
+                border.color: T.gold
+                border.width: 2
+                SequentialAnimation on opacity {
+                    running: markL.visible
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.65; duration: 850; easing.type: Easing.OutQuad }
+                    NumberAnimation { to: 0.0; duration: 850; easing.type: Easing.InQuad }
+                }
+            }
         }
     }
 

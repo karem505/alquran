@@ -16,7 +16,7 @@ Item {
     signal closed()
 
     property int tab: 0          // 0 سور 1 أجزاء 2 أحزاب 3 أرباع 4 صفحات
-    property string tabTitle: ["السور", "الأجزاء", "الأحزاب", "الأرباع", "الصفحات"][tab]
+    property var tabTitles: ["السور", "الأجزاء", "الأحزاب", "الأرباع", "الصفحات"]
     property var model: []
 
     function open() {
@@ -137,8 +137,9 @@ Item {
             anchors.margins: 10
             height: 40
             spacing: 6
+            layoutDirection: Qt.RightToLeft
             Repeater {
-                model: root.tabTitle
+                model: root.tabTitles
                 delegate: Rectangle {
                     required property string modelData
                     required property int index
@@ -160,7 +161,8 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: { root.tab = parent.index; root.rebuild(); }
+                        property var navRoot: root
+                        onClicked: { tabMa.navRoot.tab = tabMa.parent.index; tabMa.navRoot.rebuild(); }
                     }
                 }
             }

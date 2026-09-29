@@ -10,6 +10,7 @@ Item {
     property bool ready: false
     property var q: null      // quran.json
     property var nv: null     // nav.json
+    property var pos: null    // إحداثيات الآيات على الصور
     property var suraStart: []   // فهرس أول آية لكل سورة
     property var juzG: []
     property var hizbG: []
@@ -34,6 +35,14 @@ Item {
         onLoaded: {
             try { data.nv = JSON.parse(nf.text()); } catch (e) { console.log("nav.json parse:", e); }
             data.check();
+        }
+    }
+    FileView {
+        id: pf
+        path: Quickshell.shellDir + "/data/ayah_positions.json"
+        watchChanges: false
+        onLoaded: {
+            try { data.pos = JSON.parse(pf.text()); } catch (e) { console.log("positions parse:", e); }
         }
     }
 
@@ -147,6 +156,14 @@ Item {
             }
         }
         return res;
+    }
+
+    // إحداثيات الآية على صورتها (بمقياس الصورة الأصلية)
+    function posOfAya(s, a) {
+        if (!data.pos || !data.ready) return null;
+        var j = data.gi(s, a);
+        if (j < 0 || j >= data.pos.x.length) return null;
+        return { x: data.pos.x[j], y: data.pos.y[j], w: data.pos.w, h: data.pos.h };
     }
 
     // رقم صفحة لآية

@@ -58,7 +58,7 @@ Item {
     function jumpTo(m) {
         if (!m) return;
         var info = null;
-        if (m.kind === "aya") info = { sName: m.sName, a: m.a, page: m.page };
+        if (m.kind === "aya") info = { s: m.s, sName: m.sName, a: m.a, page: m.page };
         root.close();
         root.jump(m.page, info);
     }
@@ -166,7 +166,7 @@ Item {
                     anchors.leftMargin: 12
                     anchors.top: parent.top
                     anchors.topMargin: 30
-                    text: parent.modelData.text
+                    text: parent.modelData.kind === "aya" && parent.modelData.text !== undefined ? parent.modelData.text : ""
                     color: T.ink
                     font.family: T.fontUI
                     font.pixelSize: 15
@@ -179,7 +179,8 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.jumpTo(parent.modelData)
+                    property var panelRoot: root
+                    onClicked: rowMa.panelRoot.jumpTo(parent.modelData)
                 }
             }
         }

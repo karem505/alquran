@@ -20,6 +20,7 @@ ShellRoot {
 
             property int rightPage: 1
             property var found: null
+            property var foundPos: null
             readonly property var loc: (data.ready && rightPage > 0) ? data.locate(rightPage) : null
 
             Data { id: data }
@@ -33,6 +34,7 @@ ShellRoot {
             function goto(page) {
                 app.rightPage = clampRight(page);
                 app.found = null;
+                app.foundPos = null;
                 reader.forceActiveFocus();
             }
             function pageMove(d) { app.goto(app.rightPage + d); }
@@ -80,6 +82,7 @@ ShellRoot {
                 rightPage: app.rightPage
                 pagesDir: Quickshell.shellDir + "/pages"
                 found: app.found
+                foundPos: app.foundPos
                 onForward: app.pageMove(2)
                 onBackward: app.pageMove(-2)
                 onJump: function (page) { app.goto(page); }
@@ -101,7 +104,10 @@ ShellRoot {
                 qdata: data
                 onJump: function (page, info) {
                     app.goto(page);
-                    if (info) app.found = info;
+                    if (info) {
+                        app.found = info;
+                        app.foundPos = data.posOfAya(info.s, info.a);
+                    }
                 }
                 onClosed: reader.forceActiveFocus()
             }
