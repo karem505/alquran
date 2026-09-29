@@ -13,6 +13,7 @@ Item {
     property var found: null           // {s, sName, a, page} آية مقصودة من البحث
     property var foundPos: null        // {x, y, w, h} موضع الآية على الصورة الأصلية
     property var bookmarks: []         // علامات الحفظ [{p, s, a}]
+    property int reloadTick: 0         // يزيد مرة واحدة عند اكتمال تنزيل الصفحات لإعادة تحميلها
     readonly property int leftPage: rightPage + 1
 
     signal forward()
@@ -56,7 +57,9 @@ Item {
         var base = String(root.pagesDir);
         if (base.indexOf("file://") === 0)
             base = base.substring(7);
-        return "file://" + encodeURI(base) + "/p" + n + ".jpg";
+        var url = "file://" + encodeURI(base) + "/p" + n + ".jpg";
+        if (root.reloadTick > 0) url += "#" + root.reloadTick;
+        return url;
     }
 
     function hasBm(p) {

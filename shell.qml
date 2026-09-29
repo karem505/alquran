@@ -28,6 +28,20 @@ ShellRoot {
             readonly property var loc: (data.ready && rightPage > 0) ? data.locate(rightPage) : null
             readonly property bool bookmarkedNow: isBookmarked() >= 0
 
+            // ---------- مسارات النسختين: تطوير بجانب المشروع / تركيب نظامي ----------
+            readonly property string appDir: Quickshell.shellDir
+            property string pagesDir: ""          // تُحدَّد بعد فحص المسارات
+            property string pagesMode: "?"
+            property int dlCount: 604
+            property bool pagesReady: true
+            property bool fetchFailed: false
+
+            function startFetch() {
+                app.fetchFailed = false;
+                fetchProc.running = true;
+                pollTimer.running = true;
+            }
+
             Data { id: data }
 
             function clampRight(p) {
@@ -94,6 +108,59 @@ ShellRoot {
             onRightPageChanged: saveTimer.restart()
             onBookmarksChanged: saveTimer.restart()
 
+            // ---------- فحص مسار الصفحات + تنزيل أول تشغيل ----------
+            Process {
+                id: pathProbe
+                command: ["bash", "-c",
+                    'DEV="' + app.appDir + '/pages"; USR="${XDG_DATA_HOME:-$HOME/.local/share}/alquran/pages"; ' +
+                    'if [ -f "$DEV/p604.jpg" ]; then echo "DEV|$DEV"; else mkdir -p "$USR"; N=$(ls "$USR"/p*.jpg 2>/dev/null | wc -l); echo "USER|$USR|$N"; fi']
+                running: true
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        var parts = text.trim().split("|");
+                        app.pagesMode = parts[0];
+                        app.pagesDir = parts[1];
+                        var n = parseInt(parts[2] || "604");
+                        app.dlCount = (parts[0] === "DEV") ? 604 : n;
+                        console.log("MUSHAF pages mode=" + parts[0] + " dir=" + parts[1] + " count=" + app.dlCount);
+                        if (app.dlCount < 604) {
+                            app.pagesReady = false;
+                            app.startFetch();
+                        }
+                    }
+                }
+            }
+            Process {
+                id: fetchProc
+                command: ["bash", app.appDir + "/tools/fetch-pages.sh", app.pagesDir]
+                onExited: {
+                    pollTimer.running = false;
+                    pollNow.running = true;
+                }
+            }
+            Process {
+                id: pollNow
+                command: ["bash", "-c", 'ls "' + app.pagesDir + '"/p*.jpg 2>/dev/null | wc -l']
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        app.dlCount = parseInt(text.trim() || "0");
+                        if (app.dlCount >= 604) {
+                            if (!app.pagesReady) reader.reloadTick = reader.reloadTick + 1;
+                            app.pagesReady = true;
+                            app.fetchFailed = false;
+                        } else if (!fetchProc.running && !pollTimer.running) {
+                            app.fetchFailed = true;
+                        }
+                    }
+                }
+            }
+            Timer {
+                id: pollTimer
+                interval: 1500
+                repeat: true
+                onTriggered: pollNow.running = true
+            }
+
             Rectangle { anchors.fill: parent; color: T.bg }
 
             HeaderBar {
@@ -116,7 +183,7 @@ ShellRoot {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 rightPage: app.rightPage
-                pagesDir: Quickshell.shellDir + "/pages"
+                pagesDir: app.pagesDir
                 found: app.found
                 foundPos: app.foundPos
                 bookmarks: app.bookmarks
@@ -157,6 +224,17 @@ ShellRoot {
                 onClosed: reader.forceActiveFocus()
             }
 
+            // شاشة أول تشغيل: تنزيل صفحات المصحف
+            DownloadView {
+                id: download
+                anchors.fill: parent
+                z: 60
+                visible: !app.pagesReady
+                count: app.dlCount
+                failed: app.fetchFailed
+                onRetry: app.startFetch()
+            }
+
             // ---------- واجهة IPC (للأتمتة والاختبار) ----------
             // qs ipc call mushaf bookmark | gotoPage 42 | openNav | navTab 5 | closeAll
             IpcHandler {
@@ -165,6 +243,11 @@ ShellRoot {
                 function gotoPage(page: int): void { app.goto(page); }
                 function openNav() { nav.open(); }
                 function navTab(i: int): void { nav.tab = i; nav.rebuild(); }
+                // حالة تنزيل الصفحات (للاختبار)
+                function fetchState(): string {
+                    return JSON.stringify({ mode: app.pagesMode, dir: app.pagesDir, count: app.dlCount, ready: app.pagesReady, failed: app.fetchFailed });
+                }
+                function retryFetch(): void { app.startFetch(); }
                 // اختبار: إزالة أول علامة عبر نفس مسار زر ✕ في القائمة
                 function navRemoveFirst(): void {
                     if (nav.bookmarks.length > 0) nav.bookmarkRemove(nav.bookmarks[0]);
