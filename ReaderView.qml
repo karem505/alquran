@@ -17,7 +17,7 @@ Item {
     signal jump(int page)
 
     // نسبة عرض/ارتفاع صفحة المصحف (تُضبط بعد توليد الصور)
-    readonly property real pageAR: 0.648
+    readonly property real pageAR: 0.6697
     readonly property real gap: Math.max(14, width * 0.012)
 
     // ---------- حدود وأبعاد ----------
@@ -56,7 +56,6 @@ Item {
             anchors.fill: parent
             anchors.margins: 1
             source: root.src(root.rightPage)
-            sourceSize.width: Math.max(600, Math.round(root.pageW * 1.6))
             asynchronous: true
             smooth: true
             mipmap: true
@@ -84,7 +83,6 @@ Item {
             anchors.fill: parent
             anchors.margins: 1
             source: root.leftPage <= root.totalPages ? root.src(root.leftPage) : ""
-            sourceSize.width: Math.max(600, Math.round(root.pageW * 1.6))
             asynchronous: true
             smooth: true
             mipmap: true
