@@ -1,0 +1,15 @@
+{
+  "name": "mushafi-tasmee-engine",
+  "private": true,
+  "version": "0.1.0",
+  "description": "محرك التسميع لمصحفي: Tilawa (أوفلاين) + مايك PipeWire، أحداث JSON lines",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "@tilawa/core": "^1.0.0-rc.1",
+    "onnxruntime-node": "^1.31.1"
+  }
+}

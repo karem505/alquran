@@ -6,3 +6,5 @@ pages/*.jpg
 pages/*.webp
 data/raw/
 *.pdf
+fonts/
+engine/node_modules/
