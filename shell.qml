@@ -36,6 +36,32 @@ ShellRoot {
             property bool pagesReady: true
             property bool fetchFailed: false
 
+            // ---------- وضع التسميع ----------
+            property bool tasmee: false
+            property bool tasmeeLoaded: false
+            // خطوط QPC V2: بجانب المشروع في التطوير، أو بجانب الصفحات في التركيب النظامي
+            readonly property string fontsDir: app.pagesMode === "DEV" ? app.appDir + "/fonts/qpc-v2"
+                                              : String(app.pagesDir).replace(/\/pages$/, "") + "/qpc-v2"
+            function setTasmee(on) {
+                if (on && !app.pagesReady) return;
+                app.tasmee = on;
+                if (on) {
+                    app.tasmeeLoaded = true;
+                    tasmeeEngine.boot();
+                    app.fetchFonts([app.rightPage, app.rightPage + 1]);
+                    bulkFonts.running = true;
+                } else if (tasmeeEngine.sessionActive) {
+                    tasmeeEngine.stop();
+                }
+                if (!on) reader.forceActiveFocus();
+            }
+            // تنزيل خطوط صفحات بعينها عند الحاجة (أولوية)، ثم الباقي في الخلفية
+            function fetchFonts(pages) {
+                if (app.fontsDir === "" || app.pagesDir === "") return;
+                fontFetch.command = ["bash", app.appDir + "/tools/fetch-qpc-fonts.sh", app.fontsDir].concat(pages.map(String));
+                fontFetch.running = true;
+            }
+
             function startFetch() {
                 app.fetchFailed = false;
                 fetchProc.running = true;
@@ -43,6 +69,16 @@ ShellRoot {
             }
 
             Data { id: data }
+            readonly property var qdataRef: data
+            TasmeeEngine { id: tasmeeEngine }
+            Process {
+                id: fontFetch
+                onExited: if (tasmeeView.item) tasmeeView.item.fontsTick++
+            }
+            Process {
+                id: bulkFonts
+                command: ["nice", "-n", "19", "bash", app.appDir + "/tools/fetch-qpc-fonts.sh", app.fontsDir]
+            }
 
             function clampRight(p) {
                 if (p > 603) p = 603;
@@ -105,7 +141,10 @@ ShellRoot {
                     try { stateFile.setText(JSON.stringify({ page: app.rightPage, bookmarks: app.bookmarks })); } catch (e) {}
                 }
             }
-            onRightPageChanged: saveTimer.restart()
+            onRightPageChanged: {
+                saveTimer.restart();
+                if (app.tasmee) app.fetchFonts([app.rightPage, app.rightPage + 1]);
+            }
             onBookmarksChanged: saveTimer.restart()
 
             // ---------- فحص مسار الصفحات + تنزيل أول تشغيل ----------
@@ -174,10 +213,13 @@ ShellRoot {
                 onOpenMenu: nav.open()
                 onOpenSearch: search.open()
                 onAddBookmark: app.toggleBookmark()
+                tasmeeOn: app.tasmee
+                onToggleTasmee: app.setTasmee(!app.tasmee)
             }
 
             ReaderView {
                 id: reader
+                visible: !app.tasmee
                 anchors.top: header.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -190,6 +232,25 @@ ShellRoot {
                 onForward: app.pageMove(2)
                 onBackward: app.pageMove(-2)
                 onJump: function (page) { app.goto(page); }
+            }
+
+            Loader {
+                id: tasmeeView
+                active: app.tasmeeLoaded
+                visible: app.tasmee
+                anchors.top: header.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                sourceComponent: TasmeeView {
+                    engine: tasmeeEngine
+                    qdata: app.qdataRef
+                    rightPage: app.rightPage
+                    pagesDir: app.pagesDir
+                    fontsDir: app.fontsDir
+                    onJump: function (page) { app.rightPage = app.clampRight(page); }
+                    onExitRequested: app.setTasmee(false)
+                }
             }
 
             NavMenu {
@@ -262,6 +323,28 @@ ShellRoot {
                         if (tops[i].appId === "alquran") { tops[i].activate(); return; }
                     }
                 }
+                // ---- وضع التسميع (للاختبار والعرض) ----
+                function tasmee(on: bool): void { app.setTasmee(on); }
+                function tasmeeMode(mode: string): void { if (tasmeeView.item) tasmeeView.item.mode = mode; }
+                function tasmeeRange(sura: int, from: int, to: int): void {
+                    if (!tasmeeView.item) return;
+                    tasmeeView.item.rangeSura = sura; tasmeeView.item.rangeFrom = from; tasmeeView.item.rangeTo = to;
+                }
+                function tasmeeStart(): void { if (tasmeeView.item) tasmeeView.item.startSession("mic"); }
+                // تشغيل تسجيل بدل المايك: مقاطع JSON [{"file","from","dur"}, ...] بسرعة الزمن الحقيقي
+                function tasmeeFile(segments: string): void {
+                    if (tasmeeView.item) tasmeeView.item.startSession({ segments: JSON.parse(segments), realtime: true });
+                }
+                function tasmeeStop(): void { tasmeeEngine.stop(); }
+                function tasmeeHide(on: bool): void { if (tasmeeView.item) tasmeeView.item.hideUnread = on; }
+                function tasmeeOriginal(on: bool): void { if (tasmeeView.item) tasmeeView.item.showOriginal = on; }
+                function tasmeeState(): string {
+                    var v = tasmeeView.item;
+                    return JSON.stringify({ on: app.tasmee, ready: tasmeeEngine.ready, loading: tasmeeEngine.loading,
+                        error: tasmeeEngine.error, active: tasmeeEngine.sessionActive, page: app.rightPage,
+                        pos: v ? v.pos : null, mistakes: v ? v.mistakes.length : 0, sims: v ? v.sims.length : 0,
+                        summary: v ? v.summary : null });
+                }
                 function snap(path: string): void {
                     app.grabToImage(function (result) {
                         var ok = result.saveToFile(path);
@@ -303,11 +386,13 @@ ShellRoot {
             Shortcut { sequence: "Ctrl+G"; onActivated: nav.open() }
             Shortcut { sequence: "Ctrl+B"; onActivated: app.toggleBookmark() }
             Shortcut { sequence: "F11"; onActivated: win.fullscreen = !win.fullscreen }
+            Shortcut { sequence: "Ctrl+T"; onActivated: app.setTasmee(!app.tasmee) }
             Shortcut {
                 sequence: "Escape"
                 onActivated: {
                     if (search.visible) search.close();
                     else if (nav.visible) nav.close();
+                    else if (app.tasmee && !tasmeeEngine.sessionActive) app.setTasmee(false);
                 }
             }
         }

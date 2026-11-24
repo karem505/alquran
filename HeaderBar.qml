@@ -11,10 +11,12 @@ Item {
     property int page: 1
     property int totalPages: 604
     property bool bookmarked: false
+    property bool tasmeeOn: false
 
     signal openMenu()
     signal openSearch()
     signal addBookmark()
+    signal toggleTasmee()
 
     Rectangle { anchors.fill: parent; color: "transparent" }
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: T.edge; opacity: 0.7 }
@@ -50,6 +52,17 @@ Item {
                 border.width: 1
                 Text { id: searchTxt; anchors.centerIn: parent; text: "بحث"; color: T.gold; font.family: T.fontUI; font.pixelSize: 15 }
                 MouseArea { id: searchMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.openSearch() }
+            }
+            // زر التسميع — Ctrl+T
+            Rectangle {
+                width: tsTxt.implicitWidth + 22
+                height: 32
+                radius: 16
+                color: root.tasmeeOn ? T.gold : (tsMa.containsMouse ? T.selBg : "transparent")
+                border.color: root.tasmeeOn ? T.gold : T.goldSoft
+                border.width: 1
+                Text { id: tsTxt; anchors.centerIn: parent; text: root.tasmeeOn ? "العودة للقراءة" : "تسميع"; color: root.tasmeeOn ? "#FFFFFF" : T.gold; font.family: T.fontUI; font.pixelSize: 15 }
+                MouseArea { id: tsMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.toggleTasmee() }
             }
             // زر العلامة (حفظ الموضع) — Ctrl+B
             Rectangle {

@@ -67,10 +67,8 @@ Item {
         id: canvas
         width: root.srcW
         height: root.srcH
-        scale: root.sc
-        transformOrigin: Item.TopLeft
-        x: (root.width - root.srcW * root.sc) / 2
-        y: (root.height - root.srcH * root.sc) / 2
+        // تمدد مثل وضع القراءة تمامًا (الصورة تملأ مكانها) — الصفحتان ١ و٢ نسبتهما مختلفة قليلًا
+        transform: Scale { xScale: root.width / root.srcW; yScale: root.height / root.srcH }
 
         Image {
             anchors.fill: parent
@@ -178,7 +176,7 @@ Item {
                         readonly property bool hidden: {
                             root.marksRev;
                             if (!root.hideUnread) return false;
-                            if (isEnd) return !root.readSet[root.key(wd[1], wd[2], 1)];
+                            if (isEnd) return !root.readSet[root.key(wd[1], wd[2], 0)];
                             return !root.readSet[root.key(wd[1], wd[2], wd[4])];
                         }
 
