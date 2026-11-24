@@ -138,6 +138,36 @@ def measure_oval(p):
     return out
 
 
+def detect_shifted_headers(pages):
+    """أزواج (P, P+1): البيانات تضع ترويسة في السطر ١٥ من P والصورة تضعها في السطر ١ من P+1."""
+    from PIL import Image
+    import numpy as np
+
+    def img_headers(p):
+        a = np.asarray(Image.open(os.path.join(PAGES, f'p{p:03d}.jpg')).convert('RGB')).astype(int)
+        sat = (a.max(2) - a.min(2)) > 40
+        out = []
+        for i in range(15):
+            band = sat[int(INNER[1] + i * LINE_H):int(INNER[1] + (i + 1) * LINE_H), 70:736]
+            out.append(band.mean() > 0.08)        # الترويسة مساحة ملوّنة كبيرة
+        return out
+
+    res, bad = [], []
+    for p in range(3, 604):
+        L = pages[p - 1]['l']
+        dh = [ln['t'] == 'h' for ln in L]
+        ih = img_headers(p)
+        if dh == ih:
+            continue
+        if dh[14] and not ih[14] and img_headers(p + 1)[0] and not any(x['t'] == 'h' for x in pages[p]['l']):
+            res.append((p, p + 1))
+        elif not (p - 1, p) in res:
+            bad.append(p)
+    if bad:
+        print('⚠ صفحات تختلف ترويساتها عن الصور ولم تُعالج:', bad)
+    return res
+
+
 def main():
     os.makedirs(RAW, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
@@ -177,6 +207,7 @@ def main():
     print('آيات فيها كلمة QPC مدمجة:', {f'{k[0]}:{k[1]}': [list(x) for x in m if x[0] != x[1]] for k, m in merged.items()})
 
     pages = []
+    fixed_markers = [0]
     sura_first = {}
     n_words = n_ends = 0
     for p in range(1, 605):
@@ -210,6 +241,13 @@ def main():
                 # position في QPC يعدّ العلامة أيضًا؟ لا: العلامة آخر عنصر؛ الكلمات 1..n
                 t0, t1 = maps[(s, a)][w[3] - 1]
                 w[3], w[4] = t0, t1
+        # تصحيح بيانات QPC: علامة نهاية آية في أول السطر تخص آخر السطر السابق (لا يبدأ سطر بعلامة آية
+        # في مصحف المدينة؛ مؤكد بالمقارنة مع الصور)
+        for i in range(1, len(out_lines)):
+            L, P = out_lines[i], out_lines[i - 1]
+            while L and P and L['w'] and L['w'][0][3] == 0:
+                P['w'].append(L['w'].pop(0))
+                fixed_markers[0] += 1
         # الأسطر الفارغة: ترويسة سورة + بسملة قبل أول كلمة لكل سورة تبدأ في الصفحة
         for i, L in enumerate(out_lines):
             if L:
@@ -265,6 +303,28 @@ def main():
                     measured += 1
                 else:
                     line['x'] = [86, 721] if p > 2 else [250, 595]
+
+    # ---------- صفحات تختلف فيها الطبعة المصورة عن بيانات V2 في موضع ترويسة السورة ----------
+    # V2 يضع الترويسة في آخر سطر من الصفحة P، والصورة تضعها أول الصفحة P+1 (فتختلف أسطر الصفحتين).
+    # هذه الصفحات تُرسم كاملة من البيانات ("own"): غطاء أبيض على كل المساحة الداخلية، والترويسة/البسملة
+    # صورة مقتطعة من سطرها في الصورة الأصلية (src = [صفحة، سطر]).
+    own = detect_shifted_headers(pages)
+    for p, nxt in own:
+        P, N = pages[p - 1], pages[nxt - 1]
+        P['own'] = True
+        N['own'] = True
+        for i, line in enumerate(P['l']):
+            if line['t'] == 'h':
+                line['src'] = [nxt, 1]
+        for i, line in enumerate(N['l']):
+            if line['t'] == 'b':
+                line['src'] = [nxt, 2]
+        for pg in (P, N):
+            for line in pg['l']:
+                if line['t'] == 'w':
+                    line['x'] = [86, 721]
+                    line.pop('m', None)
+    print(f'علامات آيات نُقلت لآخر السطر السابق: {fixed_markers[0]}، صفحات مرسومة كاملة (ترويسة منقولة): {[x for pr in own for x in pr]}')
 
     data = {
         'v': 1,

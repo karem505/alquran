@@ -41,6 +41,7 @@ Item {
     property real kPage: 1.0
     property var fits: ({})
     readonly property real fullW: special ? 380 : 630
+    readonly property real wordGap: special ? 2 : 2.5    // الفراغ الطبيعي بين حبر كلمتين (بكسل الصورة)
     function reportFit(i, f) { fits[i] = f; fitTimer.restart(); }
     Timer {
         id: fitTimer
@@ -77,6 +78,42 @@ Item {
             smooth: true
             mipmap: true
             cache: false
+        }
+
+        // صفحات «مرسومة كاملة» (ترويسة السورة في موضع مختلف عن الصورة): غطاء على المساحة الداخلية كلها
+        Rectangle {
+            visible: root.lay !== null && root.lay.own === true && root.fontReady && !root.showOriginal
+            x: 64; y: 65; width: 678; height: 1074
+            color: "#ffffff"
+        }
+        function srcUrl(p) {
+            var n = p < 10 ? "00" + p : (p < 100 ? "0" + p : "" + p);
+            return String(root.imageUrl).replace(/p[0-9]{3}\.jpg/, "p" + n + ".jpg");
+        }
+        Repeater {
+            model: (root.lay && root.lay.own && root.fontReady && !root.showOriginal) ? root.lay.l : []
+            delegate: Item {
+                required property var modelData
+                required property int index
+                readonly property bool has: modelData && modelData.src !== undefined
+                visible: has
+                x: 63
+                y: 64 + index * (1076 / 15)
+                width: 680
+                height: 1076 / 15
+                clip: true
+                Image {
+                    visible: parent.has
+                    source: parent.has ? canvas.srcUrl(parent.modelData.src[0]) : ""
+                    x: -63
+                    y: parent.has ? -(64 + (parent.modelData.src[1] - 1) * (1076 / 15)) : 0
+                    width: 807
+                    height: 1205
+                    asynchronous: true
+                    smooth: true
+                    mipmap: true
+                }
+            }
         }
 
         Repeater {
@@ -122,12 +159,18 @@ Item {
                     }
                     var W = lineItem.width;
                     // ملاءمة السطر وحده (فراغ أدنى ٢) + ملاءمة مريحة (فراغ ٦) تُرسل لحساب مقياس الصفحة
-                    var fitMax = W / sum;
-                    var fitNice = W / sum;
+                    // العروض = حدود الحبر الفعلية (بعض رموز QPC لها عرض تقدّم ضخم في أسطر نهاية السور)
+                    var fitMax = (W - 1 * (n - 1)) / sum;
+                    var fitNice = (W - root.wordGap * (n - 1)) / sum;
                     if (W >= root.fullW * 0.9 && n > 2) root.reportFit(index, fitNice);
                     var k = Math.min(root.kPage, fitMax);
                     var gap = n > 1 ? (W - sum * k) / (n - 1) : 0;
                     var xr = W;               // من اليمين لليسار
+                    // صفحة مرسومة كاملة: السطر القصير (آخر سورة) يُوسَّط بدل مطّه
+                    if (root.lay && root.lay.own && sum * k < W * 0.8) {
+                        gap = 0;
+                        xr = W / 2 + sum * k / 2;
+                    }
                     if (n === 1) xr = W / 2 + ws[0] * k / 2;
                     for (var j = 0; j < n; j++) {
                         var it2 = words.itemAt(j);
@@ -152,7 +195,12 @@ Item {
                         readonly property bool isEnd: wd[3] === 0
                         readonly property string k0: root.key(wd[1], wd[2], wd[3])
                         property real k: 1
-                        readonly property real natural: glyph.implicitWidth
+                        readonly property real natural: Math.max(1, tm.tightBoundingRect.width)
+                        TextMetrics {
+                            id: tm
+                            font: glyph.font
+                            text: glyph.text
+                        }
                         height: lineItem.height
                         width: natural * k
 
@@ -253,6 +301,7 @@ Item {
                             Behavior on opacity { NumberAnimation { duration: 160 } }
                             scale: wordItem.k
                             transformOrigin: Item.Left
+                            x: -tm.tightBoundingRect.x * wordItem.k
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: root.special ? 2 : -2.0
                             renderType: Text.QtRendering
