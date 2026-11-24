@@ -81,6 +81,30 @@ def word_map(tw, qw):
     return out
 
 
+def measure_mask(p, lines):
+    """حدود الغطاء الرأسية لكل سطر نص (بإحداثيات الصورة): حزمة السطر، لكن تتوقف قبل خطوط إطار
+    ترويسة السورة المجاورة (صفوف داكنة تعبر عرض الصفحة) حتى لا يُمسح جزء من الإطار."""
+    from PIL import Image
+    import numpy as np
+    a = np.asarray(Image.open(os.path.join(PAGES, f'p{p:03d}.jpg')).convert('RGB')).astype(int)
+    # خط الإطار: صف داكن يعبر ٩٠٪ من العرض، ونبحث عنه قرب حافتي الحزمة فقط (١٢ بكسل) حتى لا
+    # يُخلط بخط الكشيدة الممتد داخل نص السطر نفسه
+    rule = (a.min(2)[:, 70:736] < 200).mean(1) > 0.9
+    out = {}
+    for i in lines:
+        # تداخل بكسلين مع حزم الأسطر المجاورة (الأغطية تُرسم قبل النص كله فلا تقصّ حروفًا)
+        top = INNER[1] + i * LINE_H - 2
+        bot = INNER[1] + (i + 1) * LINE_H + 2
+        hits = [y for y in range(int(top), int(top) + 12) if rule[y]]
+        if hits:
+            top = max(hits) + 2
+        hits = [y for y in range(int(bot) - 12, int(bot) + 1) if rule[y]]
+        if hits:
+            bot = min(hits) - 2
+        out[i] = [round(top, 1), round(bot, 1)]
+    return out
+
+
 def measure_lines(p, ys):
     """حدود النص الأفقية لكل سطر من صورة الصفحة (بإحداثيات الصورة)."""
     try:
@@ -208,6 +232,9 @@ def main():
 
     pages = []
     fixed_markers = [0]
+    fixed_breaks = [0]
+    bf = os.path.join(OUT, 'break-fixes.json')
+    BREAK_FIXES = json.load(open(bf)) if os.path.exists(bf) else {}
     sura_first = {}
     n_words = n_ends = 0
     for p in range(1, 605):
@@ -248,6 +275,16 @@ def main():
             while L and P and L['w'] and L['w'][0][3] == 0:
                 P['w'].append(L['w'].pop(0))
                 fixed_markers[0] += 1
+        # فواصل أسطر مصحَّحة لتطابق طبعة الصور (tools/fix_tasmee_breaks.py → data/tasmee/break-fixes.json)
+        for first, counts in BREAK_FIXES.get(str(p), {}).items():
+            run = list(range(int(first) - 1, int(first) - 1 + len(counts)))
+            items = [w for i in run for w in out_lines[i]['w']]
+            pos = 0
+            for i, n in zip(run, counts):
+                out_lines[i]['w'] = items[pos:pos + n]
+                pos += n
+            assert pos == len(items), (p, first)
+            fixed_breaks[0] += 1
         # الأسطر الفارغة: ترويسة سورة + بسملة قبل أول كلمة لكل سورة تبدأ في الصفحة
         for i, L in enumerate(out_lines):
             if L:
@@ -296,6 +333,9 @@ def main():
         if p <= 2:
             continue
         ext = measure_lines(p, ys)
+        mk = measure_mask(p, list(ys.keys()))
+        for i in ys:
+            L[i]['mk'] = mk[i]
         for i, line in enumerate(L):
             if line and line['t'] == 'w':
                 if i in ext:
@@ -324,6 +364,7 @@ def main():
                 if line['t'] == 'w':
                     line['x'] = [86, 721]
                     line.pop('m', None)
+    print(f'فواصل أسطر مصحّحة: {fixed_breaks[0]}')
     print(f'علامات آيات نُقلت لآخر السطر السابق: {fixed_markers[0]}، صفحات مرسومة كاملة (ترويسة منقولة): {[x for pr in own for x in pr]}')
 
     data = {

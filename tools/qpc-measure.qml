@@ -11,7 +11,7 @@ Item {
     property int fs: 100
 
     FontLoader { id: fl }
-    TextMetrics { id: tm; font.family: fl.name; font.pixelSize: m.fs }
+    TextMetrics { id: tm; font.family: fl.name; font.pixelSize: 47 }
 
     function next() {
         m.page++;
@@ -36,7 +36,7 @@ Item {
             var ws = [];
             for (var j = 0; j < L[i].w.length; j++) {
                 tm.text = L[i].w[j][0];
-                ws.push(Math.round(tm.tightBoundingRect.width * 100) / 100);
+                ws.push([Math.round(tm.advanceWidth * 100) / 100, Math.round(tm.tightBoundingRect.x * 100) / 100, Math.round(tm.tightBoundingRect.width * 100) / 100]);
             }
             out.push(ws);
         }

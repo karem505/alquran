@@ -57,6 +57,7 @@ Window {
         }
         TasmeePage {
             id: tp
+            debugLayout: true
             width: w.pg <= 2 ? 843 : 807
             height: w.pg <= 2 ? 1140 : 1205
             page: w.pg

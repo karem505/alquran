@@ -20,6 +20,8 @@ Item {
     property bool fallbackFont: false // الخط غير متاح بعد
     property bool showOriginal: false // للمقارنة: الصورة الأصلية بلا رندرة
 
+    property bool debugLayout: false  // أداة المقارنة: تطبع قياسات كل سطر (فراغات الحبر/التصغير)
+
     signal wordClicked(int s, int a, int w)
 
     readonly property bool special: page > 0 && page <= 2
@@ -41,7 +43,6 @@ Item {
     property real kPage: 1.0
     property var fits: ({})
     readonly property real fullW: special ? 380 : 630
-    readonly property real wordGap: special ? 2 : 2.5    // الفراغ الطبيعي بين حبر كلمتين (بكسل الصورة)
     function reportFit(i, f) { fits[i] = f; fitTimer.restart(); }
     Timer {
         id: fitTimer
@@ -63,6 +64,11 @@ Item {
     }
 
     function key(s, a, w) { return s + ":" + a + ":" + w; }
+    function arNum(n) {
+        var d = "٠١٢٣٤٥٦٧٨٩", s = String(n), o = "";
+        for (var i = 0; i < s.length; i++) o += d[+s[i]];
+        return o;
+    }
 
     Item {
         id: canvas
@@ -116,6 +122,23 @@ Item {
             }
         }
 
+        // أغطية الورق فوق أسطر الصورة الأصلية — كلها قبل النص المرسوم، حتى لا يقصّ غطاءُ سطرٍ
+        // أطرافَ حروف السطر الذي فوقه (الحركات والمدود الهابطة)
+        Repeater {
+            model: (root.lay && root.fontReady && !root.showOriginal) ? root.lay.l : []
+            delegate: Rectangle {
+                required property var modelData
+                readonly property bool isText: modelData !== null && modelData !== undefined && modelData.t === "w"
+                visible: isText
+                // الصفحات ٣+: عرض الإطار الداخلي كاملًا؛ ١ و٢: حدود داخل البيضاوي (m)
+                x: isText ? (modelData.m ? modelData.m[0] : 66) : 0
+                width: isText ? ((modelData.m ? modelData.m[1] : 740) - x) : 0
+                y: !isText ? 0 : (modelData.mk ? modelData.mk[0] : modelData.y - root.lineH / 2 - 1)
+                height: !isText ? 0 : (modelData.mk ? modelData.mk[1] - modelData.mk[0] : root.lineH + 2)
+                color: "#ffffff"
+            }
+        }
+
         Repeater {
             model: (root.lay && root.fontReady && !root.showOriginal) ? root.lay.l : []
             delegate: Item {
@@ -130,53 +153,93 @@ Item {
                 y: isText ? ln.y - root.lineH / 2 : 0
                 height: root.lineH
 
-                // غطاء الورق فوق السطر الأصلي
-                Rectangle {
-                    // الصفحات ٣+: عرض الإطار الداخلي كاملًا؛ ١ و٢: حدود داخل البيضاوي (m)
-                    x: lineItem.isText ? ((lineItem.ln.m ? lineItem.ln.m[0] : 66) - lineItem.ln.x[0]) : 0
-                    width: lineItem.isText ? ((lineItem.ln.m ? lineItem.ln.m[1] : 740) - (lineItem.ln.m ? lineItem.ln.m[0] : 66)) : 0
-                    y: root.special ? -1 : 1
-                    height: parent.height - (root.special ? -2 : 2)
-                    color: "#ffffff"
-                }
-
-                // حجم الخط لهذا السطر: يُضبط بحيث يملأ مجموع الكلمات عرض السطر مع فراغات طبيعية
-                property real fs: root.special ? 38 : 47.2
-                property var widths: []
+                // التخطيط: خطوط QPC V2 مُبرّرة مسبقًا (عرض التقدّم لكل رمز يحمل فراغ السطر الطبيعي)،
+                // فنرصّ الكلمات بعرض التقدّم من اليمين بمقياس موحّد للصفحة، ثم نضبط الفراغات بين حدود
+                // الحبر لتطابق امتداد السطر في الصورة. ملاحظة: Text.implicitWidth لا يساوي عرض التقدّم
+                // (يضيف امتداد العلامات)، لذلك نقيس بـ TextMetrics.advanceWidth ونرسم بمحاذاة يسار صريحة.
+                property real fs: root.special ? 38 : 47
                 property bool laid: false
 
                 function relayout() {
                     if (!isText) return;
                     var n = words.count;
                     if (n === 0) return;
-                    var sum = 0, ws = [];
-                    for (var i = 0; i < n; i++) {
+                    var adv = [], rx = [], rw = [], sumAdv = 0, i;
+                    for (i = 0; i < n; i++) {
                         var it = words.itemAt(i);
-                        if (!it) return;
-                        var w = it.natural;
-                        ws.push(w);
-                        sum += w;
+                        if (!it || it.adv <= 0) return;
+                        adv.push(it.adv); rx.push(it.inkX); rw.push(it.inkW);
+                        sumAdv += it.adv;
                     }
                     var W = lineItem.width;
-                    // ملاءمة السطر وحده (فراغ أدنى ٢) + ملاءمة مريحة (فراغ ٦) تُرسل لحساب مقياس الصفحة
-                    // العروض = حدود الحبر الفعلية (بعض رموز QPC لها عرض تقدّم ضخم في أسطر نهاية السور)
-                    var fitMax = (W - 1 * (n - 1)) / sum;
-                    var fitNice = (W - root.wordGap * (n - 1)) / sum;
-                    if (W >= root.fullW * 0.9 && n > 2) root.reportFit(index, fitNice);
-                    var k = Math.min(root.kPage, fitMax);
-                    var gap = n > 1 ? (W - sum * k) / (n - 1) : 0;
-                    var xr = W;               // من اليمين لليسار
-                    // صفحة مرسومة كاملة: السطر القصير (آخر سورة) يُوسَّط بدل مطّه
-                    if (root.lay && root.lay.own && sum * k < W * 0.8) {
-                        gap = 0;
-                        xr = W / 2 + sum * k / 2;
+                    if (W >= root.fullW * 0.9 && n > 2) root.reportFit(index, W / sumAdv);
+                    var k = root.kPage;
+                    // ١) رصّ بعرض التقدّم من اليمين → حدود حبر كل كلمة
+                    var L = [], R = [], o = W;
+                    for (i = 0; i < n; i++) {
+                        o -= adv[i] * k;
+                        L.push(o + rx[i] * k);
+                        R.push(o + (rx[i] + rw[i]) * k);
                     }
-                    if (n === 1) xr = W / 2 + ws[0] * k / 2;
-                    for (var j = 0; j < n; j++) {
-                        var it2 = words.itemAt(j);
-                        it2.k = k;
-                        it2.x = xr - ws[j] * k;
-                        xr -= ws[j] * k + gap;
+                    // ٢) فراغات الحبر بين الكلمات (قد تكون سالبة: تداخل طبيعي في الرسم العثماني)
+                    var g = [];
+                    for (i = 0; i < n - 1; i++) g.push(L[i] - R[i + 1]);
+                    var span = R[0] - L[n - 1];
+                    var target = W;
+                    var own = root.lay && root.lay.own;
+                    if (own && span < W * 0.8) target = span;          // سطر قصير في صفحة مرسومة كاملة: يُوسَّط
+                    var delta = target - span;
+                    if (n > 1 && delta > 0) {
+                        for (i = 0; i < n - 1; i++) g[i] += delta / (n - 1);
+                    } else if (n > 1 && delta < 0) {
+                        // تقليص الفراغات الواسعة أولًا (لا ننزل تحت فراغ أدنى) ثم تصغير موحّد لو لزم
+                        var gMin = 3, ex = 0;
+                        for (i = 0; i < n - 1; i++) ex += Math.max(0, g[i] - gMin);
+                        var need = -delta;
+                        var f = ex > 0 ? Math.min(1, need / ex) : 0;
+                        for (i = 0; i < n - 1; i++) { var e = Math.max(0, g[i] - gMin); g[i] -= e * f; }
+                        need -= ex * f;
+                        if (need > 0.5) {
+                            var inkSum = 0, gSum = 0;
+                            for (i = 0; i < n; i++) inkSum += rw[i] * k;
+                            for (i = 0; i < n - 1; i++) gSum += g[i];
+                            var sc = Math.max(0.5, (target - gSum) / inkSum);
+                            k *= sc;
+                        }
+                    }
+                    // ٢ب) فراغ أدنى حول علامات الآيات (حبر رمز العلامة في الخط ~٣٨ بكسل والوسام المرسوم ~٣٥؛ في الطبعة ٣–٥ بكسل) — يُعوَّض من الفراغات الواسعة
+                    if (n > 1) {
+                        var gM = 3, debt = 0, isEndAt = function (j) { return words.itemAt(j).isEnd; };
+                        for (i = 0; i < n - 1; i++) {
+                            if ((isEndAt(i) || isEndAt(i + 1)) && g[i] < gM) { debt += gM - g[i]; g[i] = gM; }
+                        }
+                        if (debt > 0) {
+                            var ex2 = 0;
+                            for (i = 0; i < n - 1; i++) if (!isEndAt(i) && !isEndAt(i + 1)) ex2 += Math.max(0, g[i] - 2);
+                            var f2 = ex2 > 0 ? Math.min(1, debt / ex2) : 0;
+                            for (i = 0; i < n - 1; i++) if (!isEndAt(i) && !isEndAt(i + 1)) g[i] -= Math.max(0, g[i] - 2) * f2;
+                            var left2 = debt - ex2 * f2;
+                            if (left2 > 0.5) {
+                                var ink2 = 0;
+                                for (i = 0; i < n; i++) ink2 += rw[i] * k;
+                                k *= Math.max(0.5, (ink2 - left2) / ink2);
+                            }
+                        }
+                    }
+                    if (root.debugLayout) {
+                        var mg = 1e9;
+                        for (i = 0; i < n - 1; i++) mg = Math.min(mg, g[i]);
+                        console.log("TASMEE-LAYOUT " + root.page + " " + (index + 1) + " n=" + n + " minGap=" + mg.toFixed(1)
+                                    + " k=" + (k / root.kPage).toFixed(3) + " span=" + span.toFixed(0) + " W=" + W.toFixed(0));
+                    }
+                    // ٣) التموضع: حافة حبر الكلمة الأولى يمين السطر (أو وسطه)
+                    var right = own && span < W * 0.8 ? (W + target) / 2 : W;
+                    if (n === 1) right = W / 2 + rw[0] * k / 2;
+                    for (i = 0; i < n; i++) {
+                        var w2 = words.itemAt(i);
+                        w2.k = k;
+                        w2.x = right - rw[i] * k;
+                        if (i < n - 1) right = w2.x - g[i];
                     }
                     laid = true;
                 }
@@ -195,14 +258,18 @@ Item {
                         readonly property bool isEnd: wd[3] === 0
                         readonly property string k0: root.key(wd[1], wd[2], wd[3])
                         property real k: 1
-                        readonly property real natural: Math.max(1, tm.tightBoundingRect.width)
+                        // مقاييس الرمز: عرض التقدّم وحدود الحبر (نسبةً لبداية السطر المرسوم يسارًا)
+                        readonly property real adv: tm.advanceWidth
+                        readonly property real inkX: tm.tightBoundingRect.x
+                        readonly property real inkW: Math.max(1, tm.tightBoundingRect.width)
+                        onAdvChanged: relayoutTimer.restart()
                         TextMetrics {
                             id: tm
                             font: glyph.font
                             text: glyph.text
                         }
                         height: lineItem.height
-                        width: natural * k
+                        width: inkW * k
 
                         // حالة الكلمة: أسوأ حالة بين كلمات Tilawa التي يغطيها الرمز
                         readonly property int st: {
@@ -261,35 +328,33 @@ Item {
                             x: parent.width + 2
                         }
 
-                        // علامة نهاية الآية بألوان الطبعة: قرص كريمي + بتلتان بنفسجيتان أعلى وأسفل
+                        // علامة نهاية الآية: وسام الطبعة نفسه (مقتطع مرة واحدة من صورة المصحف، assets/ayah-medallion.png)
+                        // بنفس المقاس في كل الصفحات + رقم الآية — شكل موحّد لكل العلامات
                         Item {
                             visible: wordItem.isEnd && !wordItem.hidden
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: root.special ? 1 : -1
-                            width: wordItem.width * 0.74
-                            height: width * 1.42
-                            Rectangle {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                y: 0
-                                width: parent.width * 0.62
-                                height: parent.height
-                                radius: width / 2
-                                color: "#7A5A9C"
+                            anchors.centerIn: parent
+                            anchors.verticalCenterOffset: root.special ? 0 : 3
+                            width: root.special ? 33 : 37
+                            height: width * 47 / 37
+                            Image {
+                                anchors.fill: parent
+                                source: Qt.resolvedUrl("assets/ayah-medallion.png")
+                                smooth: true
+                                mipmap: true
                             }
-                            Rectangle {
+                            Text {
                                 anchors.centerIn: parent
-                                width: parent.width
-                                height: parent.width
-                                radius: width / 2
-                                color: "#F1E8E1"
-                                border.color: "#A0958C"
-                                border.width: 1
+                                anchors.verticalCenterOffset: 1
+                                text: root.arNum(wordItem.wd[2])
+                                font.family: "Amiri"
+                                font.pixelSize: wordItem.wd[2] >= 100 ? 13 : 15
+                                color: "#2b241c"
                             }
                         }
                         Text {
                             id: glyph
-                            text: wordItem.wd[0]
+                            // المسافة داخل رمز مركّب («۞ وما») أضيق في الطبعة من مسافة الخط
+                            text: wordItem.wd[0].replace(" ", "\u200A")
                             font.family: qfont.name
                             font.pixelSize: lineItem.fs
                             color: wordItem.isCur ? root.curColor
@@ -297,11 +362,13 @@ Item {
                                  : wordItem.st === 4 ? root.missColor
                                  : wordItem.st === 5 ? root.skipColor
                                  : root.inkColor
-                            opacity: wordItem.hidden ? 0.0 : 1.0
+                            opacity: (wordItem.hidden || wordItem.isEnd) ? 0.0 : 1.0
                             Behavior on opacity { NumberAnimation { duration: 160 } }
+                            width: wordItem.adv
+                            horizontalAlignment: Text.AlignLeft
                             scale: wordItem.k
                             transformOrigin: Item.Left
-                            x: -tm.tightBoundingRect.x * wordItem.k
+                            x: -wordItem.inkX * wordItem.k
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: root.special ? 2 : -2.0
                             renderType: Text.QtRendering
