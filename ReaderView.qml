@@ -1,4 +1,6 @@
 import QtQuick
+import Quickshell
+import Quickshell.Io
 import "theme.js" as T
 import "utils.js" as U
 
@@ -13,6 +15,7 @@ Item {
     property var found: null           // {s, sName, a, page} آية مقصودة من البحث
     property var foundPos: null        // {x, y, w, h} موضع الآية على الصورة الأصلية
     property var bookmarks: []         // علامات الحفظ [{p, s, a}]
+    property var tasmeeMark: null      // علامة «آخر تسميع» {p, s, a, kind:"tasmee"} أو null
     property int reloadTick: 0         // يزيد مرة واحدة عند اكتمال تنزيل الصفحات لإعادة تحميلها
     readonly property int leftPage: rightPage + 1
 
@@ -64,8 +67,66 @@ Item {
 
     function hasBm(p) {
         for (var i = 0; i < root.bookmarks.length; i++)
-            if (root.bookmarks[i].p === p) return true;
+            if (root.bookmarks[i].p === p && root.bookmarks[i].kind !== "tasmee") return true;
         return false;
+    }
+
+    // ---------- علامة «آخر تسميع»: امتداد الآية على الصورة (data/tasmee/ayah-bands.json، يُحمَّل عند الحاجة) ----------
+    property var ayahBands: null
+    FileView {
+        id: bandsFile
+        path: root.tasmeeMark ? Quickshell.shellDir + "/data/tasmee/ayah-bands.json" : ""
+        watchChanges: false
+        printErrors: false
+        onLoaded: { try { root.ayahBands = JSON.parse(bandsFile.text()); } catch (e) { console.log("ayah-bands parse:", e); } }
+    }
+    function markBands(p) {
+        if (!root.tasmeeMark || !root.ayahBands) return [];
+        var all = root.ayahBands[root.tasmeeMark.s + ":" + root.tasmeeMark.a] || [];
+        return all.filter(function (b) { return b[0] === p; });
+    }
+    component MarkOverlay: Item {
+        id: mo
+        property int pg: 0
+        readonly property real sw: pg <= 2 ? 843 : 807
+        readonly property real sh: pg <= 2 ? 1140 : 1205
+        readonly property var bands: root.markBands(pg)
+        anchors.fill: parent
+        anchors.margins: 1
+        Repeater {
+            model: mo.bands
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData[1] - 5) / mo.sw * mo.width
+                width: (modelData[3] - modelData[1] + 10) / mo.sw * mo.width
+                y: modelData[2] / mo.sh * mo.height
+                height: (modelData[4] - modelData[2]) / mo.sh * mo.height
+                radius: 9 / mo.sw * mo.width
+                color: Qt.rgba(0.86, 0.66, 0.18, 0.22)
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: parent.radius
+                    anchors.rightMargin: parent.radius
+                    height: Math.max(1.5, 2 / mo.sw * mo.width)
+                    color: "#B8860B"
+                    opacity: 0.7
+                }
+            }
+        }
+        // شريطة في الهامش عند أول سطر من الآية
+        Item {
+            visible: mo.bands.length > 0
+            // في الهامش بين النص والإطار (يمين امتداد السطر)، لا فوق النص حين تبدأ الآية وسط السطر
+            x: (mo.pg <= 2 ? (mo.bands.length ? mo.bands[0][3] + 7 : 0) : 727) / mo.sw * mo.width
+            y: mo.bands.length ? (mo.bands[0][2] + 6) / mo.sh * mo.height : 0
+            width: 13 / mo.sw * mo.width
+            height: 26 / mo.sh * mo.height
+            clip: true
+            Rectangle { anchors.fill: parent; color: "#B8860B"; radius: 1.5 }
+            Rectangle { width: parent.width * 0.71; height: width; rotation: 45; color: "#ffffff"; x: (parent.width - width) / 2; y: parent.height - width / 2 }
+        }
     }
 
     // ---------- الصفحة اليمنى ----------
@@ -93,6 +154,7 @@ Item {
             mipmap: true
             cache: false
         }
+        MarkOverlay { pg: root.rightPage }
 
         // علامة موضع الآية المقصودة
         Item {
@@ -154,6 +216,7 @@ Item {
             mipmap: true
             cache: false
         }
+        MarkOverlay { pg: root.leftPage; visible: root.leftPage <= root.totalPages }
 
         // علامة موضع الآية المقصودة
         Item {

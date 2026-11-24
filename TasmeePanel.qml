@@ -153,6 +153,14 @@ Rectangle {
         contentHeight: body.implicitHeight + 20
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        // للاختبار/اللقطات عبر IPC: تمرير اللوحة (‎-1 = لقسم الأخطاء)
+        Connections {
+            target: pn.tv
+            function onScrollPanelRequested(y) {
+                var target = y < 0 ? errHead.mapToItem(body, 0, 0).y - 8 : y;
+                fl.contentY = Math.max(0, Math.min(target, fl.contentHeight - fl.height));
+            }
+        }
 
         Column {
             id: body
@@ -399,9 +407,39 @@ Rectangle {
             }
 
             // ======== الأخطاء ========
-            SectionTitle {
+            Item {
+                id: errHead
                 visible: pn.tv && (pn.tv.mistakes.length > 0 || pn.tv.active)
-                text: pn.tv && pn.tv.mistakes.length ? ("الأخطاء (" + U.ar(pn.tv.mistakes.length) + ")") : "الأخطاء"
+                width: parent.width
+                height: 32
+                SectionTitle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: pn.tv && pn.tv.mistakes.length ? ("الأخطاء (" + U.ar(pn.tv.mistakes.length) + ")") : "الأخطاء"
+                }
+                // «مسح الأخطاء»: نقرة أولى تطلب التأكيد (٣ ثوانٍ)، والثانية تمسح القائمة وتظليل الصفحة
+                // (الجلسة الجارية تستمر، وتظهر الأخطاء الجديدة فقط)
+                Pill {
+                    id: clearPill
+                    property bool armed: false
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    enabledX: pn.tv && pn.tv.mistakes.length > 0
+                    label: armed ? "تأكيد المسح؟" : "مسح الأخطاء"
+                    on: armed
+                    tint: "#A93B2E"
+                    onClicked: {
+                        if (!enabledX) return;
+                        if (!armed) { armed = true; disarm.restart(); return; }
+                        armed = false;
+                        pn.tv.clearMistakes();
+                    }
+                    Timer { id: disarm; interval: 3000; onTriggered: clearPill.armed = false }
+                    // للاختبار عبر IPC: نفس مسار النقر على الزر (بما فيه خطوة التأكيد)
+                    Connections {
+                        target: pn.tv
+                        function onClearClickRequested() { clearPill.clicked(); }
+                    }
+                }
             }
             Text {
                 visible: pn.tv && pn.tv.active && pn.tv.mistakes.length === 0
@@ -496,7 +534,7 @@ Rectangle {
                             if (!s) return "";
                             var mins = Math.floor(s.durMs / 60000), secs = Math.round((s.durMs % 60000) / 1000);
                             return "المدة " + U.ar(mins) + ":" + (secs < 10 ? "٠" : "") + U.ar(secs)
-                                 + " · الآيات " + U.ar(s.ayahs) + " · الأخطاء " + U.ar(s.mistakes)
+                                 + " · الآيات " + U.ar(s.ayahs) + " · الأخطاء " + U.ar(s.mistakes) + (s.cleared ? " (مُسح " + U.ar(s.cleared) + ")" : "")
                                  + (s.sims ? " · متشابهات " + U.ar(s.sims) : "");
                         }
                     }

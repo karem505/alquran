@@ -20,6 +20,19 @@ Item {
     property bool fallbackFont: false // الخط غير متاح بعد
     property bool showOriginal: false // للمقارنة: الصورة الأصلية بلا رندرة
 
+    property string tasmeeMark: ""    // "s:a" علامة «آخر تسميع»: الآية كلها بخلفية ذهبية خفيفة + شريطة في الهامش
+    // أول سطر في الصفحة فيه آية العلامة (لموضع الشريطة)
+    readonly property int markFirstLine: {
+        if (tasmeeMark === "" || !lay) return -1;
+        for (var i = 0; i < lay.l.length; i++) {
+            var ln = lay.l[i];
+            if (!ln || ln.t !== "w") continue;
+            for (var j = 0; j < ln.w.length; j++)
+                if (ln.w[j][1] + ":" + ln.w[j][2] === tasmeeMark) return i;
+        }
+        return -1;
+    }
+
     property bool debugLayout: false  // أداة المقارنة: تطبع قياسات كل سطر (فراغات الحبر/التصغير)
 
     signal wordClicked(int s, int a, int w)
@@ -159,6 +172,52 @@ Item {
                 // (يضيف امتداد العلامات)، لذلك نقيس بـ TextMetrics.advanceWidth ونرسم بمحاذاة يسار صريحة.
                 property real fs: root.special ? 38 : 47
                 property bool laid: false
+                property int layRev: 0
+                // امتداد آية العلامة في هذا السطر (بعد التخطيط)، أو null
+                function markBand(mk, rev) {
+                    if (mk === "" || !isText || !laid) return null;
+                    var x0 = 1e9, x1 = -1e9;
+                    for (var i = 0; i < words.count; i++) {
+                        var it = words.itemAt(i);
+                        if (!it || it.wd[1] + ":" + it.wd[2] !== mk) continue;
+                        x0 = Math.min(x0, it.x);
+                        x1 = Math.max(x1, it.x + it.width);
+                    }
+                    return x1 > x0 ? { x0: x0, x1: x1 } : null;
+                }
+                // خلفية «آخر تسميع» (خلف الكلمات)
+                Rectangle {
+                    readonly property var b: lineItem.markBand(root.tasmeeMark, lineItem.layRev)
+                    visible: b !== null
+                    x: b ? b.x0 - 5 : 0
+                    width: b ? b.x1 - b.x0 + 10 : 0
+                    y: 5
+                    height: parent.height - 6
+                    radius: 9
+                    color: Qt.rgba(0.86, 0.66, 0.18, 0.20)
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.leftMargin: 6
+                        anchors.rightMargin: 6
+                        height: 2
+                        radius: 1
+                        color: "#B8860B"
+                        opacity: 0.7
+                    }
+                }
+                // شريطة «آخر تسميع» في الهامش عند أول سطر من الآية
+                Item {
+                    visible: index === root.markFirstLine && root.tasmeeMark !== ""
+                    x: lineItem.width + 5
+                    y: 10
+                    width: 13
+                    height: 26
+                    clip: true
+                    Rectangle { anchors.fill: parent; color: "#B8860B"; radius: 1.5 }
+                    Rectangle { width: 9.2; height: 9.2; rotation: 45; color: "#ffffff"; x: 1.9; y: parent.height - 4.6 }
+                }
 
                 function relayout() {
                     if (!isText) return;
@@ -242,6 +301,7 @@ Item {
                         if (i < n - 1) right = w2.x - g[i];
                     }
                     laid = true;
+                    layRev++;
                 }
                 Connections {
                     target: root

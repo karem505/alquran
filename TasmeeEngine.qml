@@ -72,6 +72,7 @@ Item {
     }
     function start(o) { eng.send(Object.assign({ cmd: "start" }, o)); }
     function stop() { eng.send({ cmd: "stop" }); }
+    function clearMistakes() { eng.send({ cmd: "clearMistakes" }); }
     function similar(s, a) { eng.send({ cmd: "similar", s: s, a: a }); }
     function quit() { if (proc.running) eng.send({ cmd: "quit" }); }
 

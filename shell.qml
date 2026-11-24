@@ -27,6 +27,25 @@ ShellRoot {
             property var bookmarks: []        // علامات الحفظ [{p, s, a}]
             readonly property var loc: (data.ready && rightPage > 0) ? data.locate(rightPage) : null
             readonly property bool bookmarkedNow: isBookmarked() >= 0
+            // علامة «آخر تسميع»: علامة واحدة من نوع خاص داخل العلامات، تُستبدل مع كل تسميع
+            readonly property var tasmeeMark: {
+                for (var i = 0; i < app.bookmarks.length; i++)
+                    if (app.bookmarks[i] && app.bookmarks[i].kind === "tasmee") return app.bookmarks[i];
+                return null;
+            }
+            function setTasmeeMark(s, a, p) {
+                var old = app.tasmeeMark;
+                if (old && old.s === s && old.a === a && old.p === p) return;
+                var arr = app.bookmarks.filter(function (b) { return b && b.kind !== "tasmee"; });
+                arr.push({ p: p, s: s, a: a, kind: "tasmee" });
+                arr.sort(function (x, y) { return x.p - y.p; });
+                app.bookmarks = arr;
+                app.saveState();          // فورًا: تبقى صحيحة حتى لو أُغلق التطبيق أثناء التسميع
+                console.log("TASMEE mark " + s + ":" + a + " p=" + p);
+            }
+            function saveState() {
+                try { stateFile.setText(JSON.stringify({ page: app.rightPage, bookmarks: app.bookmarks })); } catch (e) {}
+            }
 
             // ---------- مسارات النسختين: تطوير بجانب المشروع / تركيب نظامي ----------
             readonly property string appDir: Quickshell.shellDir
@@ -98,7 +117,7 @@ ShellRoot {
             function isBookmarked() {
                 for (var i = 0; i < app.bookmarks.length; i++) {
                     var b = app.bookmarks[i];
-                    if (b.p !== app.rightPage) continue;
+                    if (b.p !== app.rightPage || b.kind === "tasmee") continue;
                     if (app.found === null) { if (!b.a) return i; }
                     else if (b.s === app.found.s && b.a === app.found.a) return i;
                 }
@@ -137,9 +156,7 @@ ShellRoot {
             Timer {
                 id: saveTimer
                 interval: 900
-                onTriggered: {
-                    try { stateFile.setText(JSON.stringify({ page: app.rightPage, bookmarks: app.bookmarks })); } catch (e) {}
-                }
+                onTriggered: app.saveState()
             }
             onRightPageChanged: {
                 saveTimer.restart();
@@ -229,6 +246,7 @@ ShellRoot {
                 found: app.found
                 foundPos: app.foundPos
                 bookmarks: app.bookmarks
+                tasmeeMark: app.tasmeeMark
                 onForward: app.pageMove(2)
                 onBackward: app.pageMove(-2)
                 onJump: function (page) { app.goto(page); }
@@ -248,8 +266,10 @@ ShellRoot {
                     rightPage: app.rightPage
                     pagesDir: app.pagesDir
                     fontsDir: app.fontsDir
+                    lastMark: app.tasmeeMark ? app.tasmeeMark.s + ":" + app.tasmeeMark.a : ""
                     onJump: function (page) { app.rightPage = app.clampRight(page); }
                     onExitRequested: app.setTasmee(false)
+                    onTasmeePos: function (s, a, p) { app.setTasmeeMark(s, a, p); }
                 }
             }
 
@@ -263,7 +283,7 @@ ShellRoot {
                 onBookmarkRemove: function (bm) {
                     app.bookmarks = app.bookmarks.filter(function (x) {
                         if (x === bm) return false;
-                        if (bm && x && x.p === bm.p && x.a === bm.a) return false;
+                        if (bm && x && x.p === bm.p && x.a === bm.a && (x.kind === "tasmee") === (bm.kind === "tasmee")) return false;
                         return true;
                     });
                 }
@@ -336,12 +356,24 @@ ShellRoot {
                     if (tasmeeView.item) tasmeeView.item.startSession({ segments: JSON.parse(segments), realtime: true });
                 }
                 function tasmeeStop(): void { tasmeeEngine.stop(); }
+                // نفس مسار النقر على زر «مسح الأخطاء» (النقرة الأولى تطلب التأكيد والثانية تمسح)
+                function tasmeeClearClick(): void { if (tasmeeView.item) tasmeeView.item.clearClickRequested(); }
+                function tasmeeScroll(y: real): void { if (tasmeeView.item) tasmeeView.item.scrollPanelRequested(y); }
+                function bookmarksJson(): string { return JSON.stringify(app.bookmarks); }
+                function marksJson(): string {
+                    var v = tasmeeView.item;
+                    if (!v) return "{}";
+                    var c = {};
+                    for (var k in v.marks) { var st = v.marks[k]; c[st] = (c[st] || 0) + 1; }
+                    return JSON.stringify(c);
+                }
                 function tasmeeHide(on: bool): void { if (tasmeeView.item) tasmeeView.item.hideUnread = on; }
                 function tasmeeOriginal(on: bool): void { if (tasmeeView.item) tasmeeView.item.showOriginal = on; }
                 function tasmeeState(): string {
                     var v = tasmeeView.item;
                     return JSON.stringify({ on: app.tasmee, ready: tasmeeEngine.ready, loading: tasmeeEngine.loading,
                         error: tasmeeEngine.error, active: tasmeeEngine.sessionActive, page: app.rightPage,
+                        hold: v ? v.userHold : false, mark: app.tasmeeMark,
                         pos: v ? v.pos : null, mistakes: v ? v.mistakes.length : 0, sims: v ? v.sims.length : 0,
                         summary: v ? v.summary : null });
                 }

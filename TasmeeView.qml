@@ -17,6 +17,12 @@ Item {
 
     signal jump(int page)
     signal exitRequested()
+    signal clearClickRequested()               // IPC: محاكاة نقرة على زر «مسح الأخطاء»
+    signal scrollPanelRequested(real y)        // IPC: تمرير اللوحة (‎-1 = قسم الأخطاء)
+    // آخر آية تأكّد موضعها في الجلسة (تتحدّث مع كل آية جديدة، فتبقى صحيحة مهما توقّف التسميع: إيقاف، نهاية،
+    // إغلاق الوضع أو التطبيق) → علامة «آخر تسميع» الوحيدة في العلامات
+    signal tasmeePos(int s, int a, int p)
+    property string lastMark: ""               // "s:a" علامة «آخر تسميع» المحفوظة (تُظلَّل خارج الجلسة)
 
     // ---------- بيانات التخطيط ----------
     property var layout: null
@@ -172,7 +178,105 @@ Item {
         tv.message = "";
         tv.lastLockedKey = null;
         tv.pendingSkip = null;
+        tv.lastAyahKey = "";
+        tv.userHold = false;
+        tv.flippedFor = "";
+        tv.backKeys = ({});
+        tv.lastLockT = -1;
         tv.marksRev++;
+    }
+    function clearMistakes() {
+        var m = tv.marks;
+        for (var k in m) if (m[k] >= 3) m[k] = 1;
+        tv.mistakes = [];
+        tv.pendingSkip = null;
+        tv.marksRev++;
+        if (tv.active && tv.engine) tv.engine.clearMistakes();
+        console.log("TASMEE mistakes cleared");
+    }
+
+    // ---------- التقليب التلقائي ----------
+    // يقلب فور تأكد آخر كلمة في الصفحتين المعروضتين (حدث موضع locked عليها = نُطقت)، مرة واحدة،
+    // ولا يرجع للخلف بحدث متأخر (يلزم ٣ كلمات مختلفة مؤكدة في صفحة سابقة ليعود: إعادة قراءة فعلية).
+    // لو قلب المستخدم بنفسه لا نسحبه حتى يعود للقراءة: كلمة مؤكدة في الصفحتين المعروضتين، أو بعد توقف ≥ ٦ ث (أطول من وقفة ما بين الآيات).
+    property string lastAyahKey: ""
+    property bool userHold: false
+    property string flippedFor: ""
+    property var backKeys: ({})
+    property real lastLockT: -1
+    property int expectRight: 0
+    property var passageEnd: null              // [سورة، آية] نهاية المقطع (وضع المقطع)
+    property var lastWordCache: ({})
+    function clampRight(p) { if (p > 603) p = 603; if (p < 1) p = 1; if (p % 2 === 0) p -= 1; return p; }
+    function shownLast() { return (tv.leftPage <= 604) ? tv.leftPage : tv.rightPage; }
+    // آخر كلمة (ترقيم Tilawa) في صفحة + هل تنتهي الصفحة بنهاية آيتها
+    function lastWordOf(p) {
+        if (tv.lastWordCache[p] !== undefined) return tv.lastWordCache[p];
+        var res = null, endsAyah = false;
+        if (tv.layout && p >= 1 && p <= 604) {
+            var L = tv.layout.pages[p - 1].l;
+            for (var i = L.length - 1; i >= 0 && !res; i--) {
+                if (!L[i] || L[i].t !== "w") continue;
+                for (var j = L[i].w.length - 1; j >= 0; j--) {
+                    var w = L[i].w[j];
+                    if (w[3] === 0) { endsAyah = true; continue; }
+                    res = { w: [w[1], w[2], w[4]], endsAyah: endsAyah };
+                    break;
+                }
+            }
+        }
+        tv.lastWordCache[p] = res;
+        return res;
+    }
+    function autoJump(p) {
+        var r = tv.clampRight(p);
+        if (r === tv.rightPage) return;
+        tv.expectRight = r;
+        tv.jump(p);
+    }
+    onRightPageChanged: {
+        if (tv.rightPage !== tv.expectRight) {
+            // تقليب لم يطلبه التتبّع (عجلة، قائمة، نقر على خطأ/متشابه…) → نحترم اختيار المستخدم
+            if (tv.active) tv.userHold = true;
+            tv.expectRight = tv.rightPage;
+        }
+        tv.backKeys = ({});
+    }
+    function follow(e) {
+        var t = e.t || 0;
+        var wk = tv.key(e.w[0], e.w[1], e.w[2]);
+        var first = tv.rightPage, last = tv.shownLast();
+        var onSpread = e.page >= first && e.page <= last;
+        if (tv.userHold) {
+            var resumed = tv.lastLockT >= 0 && t - tv.lastLockT >= 6000;
+            if (onSpread || resumed) { tv.userHold = false; console.log("TASMEE hold released t=" + t + (onSpread ? " (on spread)" : " (resumed)")); }
+        }
+        tv.lastLockT = t;
+        if (tv.userHold || e.page <= 0) return;
+        if (onSpread) {
+            tv.backKeys = ({});
+            var lw = tv.lastWordOf(last);
+            if (lw && lw.w[0] === e.w[0] && lw.w[1] === e.w[1] && lw.w[2] === e.w[2] && tv.flippedFor !== wk && last < 604) {
+                var pe = tv.passageEnd;
+                if (pe && lw.endsAyah && pe[0] === e.w[0] && pe[1] === e.w[1]) return;   // آخر كلمة في المقطع نفسه
+                tv.flippedFor = wk;
+                console.log("TASMEE autoflip t=" + t + " word=" + wk + " " + first + "-" + last + " -> " + (last + 1));
+                tv.autoJump(last + 1);
+            }
+        } else if (e.page > last) {
+            tv.backKeys = ({});
+            console.log("TASMEE follow t=" + t + " word=" + wk + " page " + e.page);
+            tv.autoJump(e.page);
+        } else {
+            // حدث في صفحة سابقة: متأخر غالبًا، أو إعادة قراءة حقيقية
+            var bk = tv.backKeys;
+            bk[wk] = true;
+            if (Object.keys(bk).length >= 3) {
+                tv.backKeys = ({});
+                console.log("TASMEE back t=" + t + " page " + e.page);
+                tv.autoJump(e.page);
+            }
+        }
     }
     // src: "mic" أو كائن ملف (للاختبار والعرض)
     property var pendingStart: null
@@ -182,6 +286,8 @@ Item {
         tv.pendingStart = null;
         tv.resetSession();
         tv.tab = 0;
+        tv.passageEnd = null;
+        tv.expectRight = tv.rightPage;
         var o = { mode: "free", src: src || "mic", label: "تسميع حر" };
         if (tv.mode !== "free") {
             var p = tv.passageFor(tv.mode);
@@ -189,9 +295,11 @@ Item {
             o.mode = "passage";
             o.passage = p.segs;
             o.label = p.label;
+            var ls = p.segs[p.segs.length - 1];
+            tv.passageEnd = [ls.surah, ls.toAyah];
             // انتقل لبداية المقطع
             var pg = tv.pageOf(p.segs[0].surah, p.segs[0].fromAyah);
-            if (pg < tv.rightPage || pg > tv.leftPage) tv.jump(pg);
+            if (pg < tv.rightPage || pg > tv.leftPage) tv.autoJump(pg);
         }
         tv.engine.start(o);
     }
@@ -258,12 +366,15 @@ Item {
                 tv.current = k;
                 tv.lastLockedKey = e.w;
                 tv.marksRev++;
+                var ak = e.w[0] + ":" + e.w[1];
+                if (ak !== tv.lastAyahKey) {
+                    tv.lastAyahKey = ak;
+                    tv.tasmeePos(e.w[0], e.w[1], e.page > 0 ? e.page : tv.pageOf(e.w[0], e.w[1]));
+                }
+                tv.follow(e);
             } else if (e.exp && !e.w) {
                 tv.current = tv.key(e.exp[0], e.exp[1], e.exp[2]);
             }
-            // الانتقال التلقائي للصفحة
-            if (e.page > 0 && (e.page < tv.rightPage || e.page > tv.leftPage) && (e.st === "locked"))
-                tv.jump(e.page);
         } else if (e.ev === "chk") {
             k = tv.key(e.loc[0], e.loc[1], e.loc[2]);
             m = tv.marks;
@@ -283,6 +394,8 @@ Item {
             tv.sims = arr.slice(0, 6);
         } else if (e.ev === "near") {
             tv.near = e;
+        } else if (e.ev === "cleared") {
+            console.log("TASMEE engine cleared " + e.n);
         } else if (e.ev === "ended") {
             tv.summary = e.summary;
             tv.current = "";
@@ -333,6 +446,7 @@ Item {
                 hideUnread: tv.hideUnread
                 readSet: tv.readSet
                 showOriginal: tv.showOriginal
+                tasmeeMark: tv.active ? "" : tv.lastMark
                 onWordClicked: function (s, a, w) { if (tv.engine) tv.engine.similar(s, a); }
             }
         }
@@ -363,6 +477,7 @@ Item {
                 hideUnread: tv.hideUnread
                 readSet: tv.readSet
                 showOriginal: tv.showOriginal
+                tasmeeMark: tv.active ? "" : tv.lastMark
                 onWordClicked: function (s, a, w) { if (tv.engine) tv.engine.similar(s, a); }
             }
         }

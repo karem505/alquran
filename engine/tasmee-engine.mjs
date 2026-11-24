@@ -306,6 +306,7 @@ function onEvent(r, e, shadow) {
       if (e.expected.surah === sg.surah && e.expected.ayah === sg.toAyah && e.expected.word >= words) setTimeout(() => r.openNext(), 1200);
     }
   } else if (e.type === "checker") {
+    if (r.cleared && r.cleared.has(e.id)) return;   // خطأ مسحه المستخدم: لا يعود بتحديثات حالته
     const L = e.location;
     const rec = {
       ev: "chk", id: e.id, st: e.state, cls: e.errorClass, t: e.timeMs,
@@ -426,7 +427,7 @@ function finishRun(why) {
       id: r.id, mode: r.mode, label: r.label, startedAt: r.startedAt,
       durMs: Math.round(r.audioMs), wallMs: Date.now() - r.wall0,
       ayahs: uniq.length, first: ayahs[0] || null, last: ayahs[ayahs.length - 1] || null,
-      mistakes: confirmed.length, byClass, hot, sims: r.sims.length, why,
+      mistakes: confirmed.length, cleared: r.clearedCount || 0, byClass, hot, sims: r.sims.length, why,
       list: confirmed.map((m) => ({ cls: m.cls, loc: m.loc, text: m.text, sura: m.sura, page: m.page })),
     };
     emit({ ev: "ended", summary });
@@ -468,6 +469,17 @@ async function handle(cmd) {
     case "init": return init(cmd);
     case "start": return startRun(cmd);
     case "stop": return finishRun("stop");
+    // «مسح الأخطاء» من اللوحة: الجلسة تستمر، والأخطاء السابقة لا تُحتسب في الملخص ولا تعود
+    case "clearMistakes": {
+      if (!run) return;
+      if (!run.cleared) run.cleared = new Set();
+      let n = 0;
+      for (const [id, m] of run.mistakes) { run.cleared.add(id); if (m.st === "confirmed") n++; }
+      run.mistakes.clear();
+      run.clearedCount = (run.clearedCount || 0) + n;
+      emit({ ev: "cleared", n });
+      return;
+    }
     case "similar": {
       const list = similarOf(cmd.s, cmd.a).map((x) => {
         const [s2, a2] = x.k.split(":").map(Number);

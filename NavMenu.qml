@@ -82,8 +82,21 @@ Item {
             }
         } else {
             var bms = root.bookmarks || [];
+            // «آخر تسميع» أولًا وبشكل مميز
+            for (i = 0; i < bms.length; i++) {
+                var tb = bms[i];
+                if (!tb || tb.kind !== "tasmee") continue;
+                var lct = root.qdata.locate(tb.p);
+                out.push({
+                    t: "آخر تسميع",
+                    s: "سورة " + root.qdata.q.surahs[tb.s - 1].name + " · الآية " + U.ar(tb.a) + " · ص " + U.ar(tb.p)
+                       + (lct ? " · الجزء " + U.ar(lct.juz) : ""),
+                    p: tb.p, idx: i, bm: tb, tasmee: true
+                });
+            }
             for (i = 0; i < bms.length; i++) {
                 var b = bms[i];
+                if (b && b.kind === "tasmee") continue;
                 var lc2 = root.qdata.locate(b.p);
                 var sub = lc2 ? ("سورة " + lc2.suraName + " · الجزء " + U.ar(lc2.juz)) : "";
                 out.push({
@@ -225,13 +238,32 @@ Item {
                 height: 58
                 color: index === root.currentIdx() ? T.selBg : (rowMa.containsMouse ? "#18845D22" : "transparent")
                 Rectangle { anchors.bottom: parent.bottom; width: parent.width - 24; x: 12; height: 1; color: T.edge; opacity: 0.4 }
+                // «آخر تسميع»: خلفية ذهبية خفيفة + شريطة
+                Rectangle {
+                    visible: bmRow.modelData.tasmee === true
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    radius: 10
+                    color: Qt.rgba(0.86, 0.66, 0.18, 0.16)
+                    border.color: "#B8860B"
+                    border.width: 1
+                    Item {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        y: 0
+                        width: 12; height: 24
+                        clip: true
+                        Rectangle { anchors.fill: parent; color: "#B8860B"; radius: 1.5 }
+                        Rectangle { width: 8.5; height: 8.5; rotation: 45; x: 1.75; y: parent.height - 4.25; color: T.panel }
+                    }
+                }
 
                 Text {
                     anchors.right: parent.right
-                    anchors.rightMargin: 14
+                    anchors.rightMargin: parent.modelData.tasmee ? 32 : 14
                     anchors.verticalCenter: parent.verticalCenter
                     text: parent.modelData.t
-                    color: index === root.currentIdx() ? T.gold : T.ink
+                    color: parent.modelData.tasmee ? "#8A6508" : (index === root.currentIdx() ? T.gold : T.ink)
                     font.family: T.fontUI
                     font.pixelSize: 17
                 }
