@@ -8,6 +8,7 @@ Rectangle {
     property var tv: null
     readonly property var eng: tv ? tv.engine : null
 
+    readonly property string hintText: "اضغط P للسماع من أول الآية، واضغطه مرة أخرى للعودة إلى التسميع."
     color: T.panel
     radius: 14
     border.color: T.goldSoft
@@ -293,6 +294,27 @@ Rectangle {
                     label: "الصورة الأصلية"
                     on: pn.tv ? pn.tv.showOriginal : false
                     onClicked: pn.tv.showOriginal = !pn.tv.showOriginal
+                }
+            }
+            // تلميح اختصار السماع: ظاهر قبل التسميع وأثناءه
+            Rectangle {
+                width: parent.width
+                height: hintT.implicitHeight + 16
+                radius: 10
+                color: "#141B7A3A"
+                border.color: "#661B7A3A"
+                Text {
+                    id: hintT
+                    objectName: "listenHint"
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    horizontalAlignment: Text.AlignRight
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.WordWrap
+                    text: pn.hintText
+                    color: "#1B5E2F"
+                    font.family: T.fontUI
+                    font.pixelSize: 13
                 }
             }
             Text {

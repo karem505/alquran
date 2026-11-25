@@ -22,7 +22,9 @@ if [ -w "$APP/engine" ]; then
 else
   ENG="$DATA/engine"
   mkdir -p "$ENG"
-  cp -r "$APP/engine/package.json" "$APP/engine/package-lock.json" "$APP/engine/tasmee-engine.mjs" "$ENG/"
+  cp "$APP/engine/package.json" "$APP/engine/package-lock.json" "$APP/engine/"*.mjs "$ENG/"
+  mkdir -p "$ENG/tools"
+  cp "$APP/engine/tools/"*.mjs "$ENG/tools/"
 fi
 if [ ! -d "$ENG/node_modules/@tilawa/core" ] || [ ! -d "$ENG/node_modules/onnxruntime-node" ]; then
   echo "STEP npm"

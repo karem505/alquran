@@ -20,11 +20,57 @@ Item {
     property bool sessionActive: false
     property real level: -90
 
+    // ---------- السماع (قراءة الشيخ الحصري بلا إنترنت) ----------
+    // idle → starting (طلبنا) → indexing (الفهرسة) → playing → stopped | error
+    property string listenSt: "idle"
+    property int listenS: 0
+    property int listenA: 0
+    property string listenMsg: ""
+    property var listenWord: null        // [سورة، آية، كلمة] الأحدث
+    property var pendingListen: null     // طلب مؤجَّل ريثما تعمل العملية
+    readonly property bool listening: listenSt === "starting" || listenSt === "indexing" || listenSt === "playing"
+    // خطّافان للاختبار فقط (بدل عملية Node)
+    property var sendHook: null
+    property var bootHook: null
+
     signal event(var e)
 
     function send(o) {
+        if (eng.sendHook) { eng.sendHook(o); return; }
         if (!proc.running) return;
         proc.write(JSON.stringify(o) + "\n");
+    }
+    function listenStart(s, a, repeat) {
+        eng.listenS = s; eng.listenA = a; eng.listenMsg = ""; eng.listenWord = null;
+        eng.listenSt = "starting";
+        eng.pendingListen = { cmd: "listenStart", s: s, a: a, repeat: repeat === true };
+        if (eng.started) eng.flushListen();
+        else if (eng.bootHook) eng.bootHook();
+        else eng.boot();
+    }
+    // يُرسل الطلب المؤجَّل (يُستدعى عند تشغيل العملية)
+    function flushListen() {
+        if (!eng.pendingListen) return;
+        var o = eng.pendingListen;
+        eng.pendingListen = null;
+        eng.send(o);
+    }
+    function listenStop() {
+        var was = eng.listening || eng.pendingListen !== null;
+        eng.pendingListen = null;
+        if (!was) return;
+        if (eng.started) eng.send({ cmd: "listenStop" });
+        eng.listenSt = "stopped";
+        eng.listenWord = null;
+    }
+    // توقفت العملية: لو كان السماع جاريًا فهو انقطع
+    function processStopped() {
+        eng.pendingListen = null;
+        if (eng.listening) {
+            eng.listenSt = "error";
+            eng.listenMsg = "توقف محرك التطبيق أثناء السماع";
+            eng.listenWord = null;
+        }
     }
     function boot() {
         if (proc.running) { if (!eng.ready) eng.send({ cmd: "init", history: eng.historyPath }); return; }
@@ -67,14 +113,19 @@ Item {
         }
         onExited: function (code) {
             if (code === 0 && eng.engineDir !== "") proc.running = true;
-            else { eng.loading = false; if (eng.error === "") eng.error = "تعذّر تجهيز محرك التسميع"; }
+            else {
+                eng.loading = false;
+                if (eng.error === "") eng.error = "تعذّر تجهيز محرك التسميع";
+                if (eng.listening) { eng.pendingListen = null; eng.listenSt = "error"; eng.listenMsg = eng.error; }
+            }
         }
     }
     function start(o) { eng.send(Object.assign({ cmd: "start" }, o)); }
     function stop() { eng.send({ cmd: "stop" }); }
     function clearMistakes() { eng.send({ cmd: "clearMistakes" }); }
     function similar(s, a) { eng.send({ cmd: "similar", s: s, a: a }); }
-    function quit() { if (proc.running) eng.send({ cmd: "quit" }); }
+    function quit() { eng.listenStop(); if (proc.running) eng.send({ cmd: "quit" }); }
+    Component.onDestruction: eng.quit()
 
     Process {
         id: proc
@@ -99,7 +150,9 @@ Item {
             eng.started = running;
             if (running) {
                 eng.send({ cmd: "init", history: eng.historyPath });
+                eng.flushListen();
             } else {
+                eng.processStopped();
                 eng.ready = false;
                 eng.sessionActive = false;
                 if (eng.loading) {
@@ -133,6 +186,30 @@ Item {
             break;
         case "level":
             eng.level = e.db;
+            break;
+        case "listen":
+            if (e.st === "indexing" || e.st === "playing") {
+                // حدث متأخر بعد إيقافنا المحلي لا يُحيي السماع
+                if (eng.listenSt === "stopped" || eng.listenSt === "idle") break;
+                eng.listenSt = e.st;
+                if (e.st === "playing" && e.s) { eng.listenS = e.s; eng.listenA = e.a; }
+                eng.listenMsg = "";
+            } else if (e.st === "stopped") {
+                eng.listenSt = "stopped";
+                eng.listenWord = null;
+            } else if (e.st === "error") {
+                eng.listenSt = "error";
+                eng.listenMsg = e.msg || "تعذّر تشغيل السماع";
+                eng.listenWord = null;
+                console.log("TASMEE listen error: " + eng.listenMsg);
+            }
+            break;
+        case "listenWord":
+            if (eng.listenSt === "playing") {
+                if (e.w && e.w.length === 3) {
+                    eng.listenS = e.w[0]; eng.listenA = e.w[1]; eng.listenWord = e.w;
+                } else if (e.w === null) eng.listenWord = null;
+            }
             break;
         case "error":
             if (e.code === "load") { eng.loading = false; eng.error = e.msg; }

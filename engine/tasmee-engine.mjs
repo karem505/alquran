@@ -7,6 +7,8 @@
 //    "label":"الصفحة ٤٢"}
 //   {"cmd":"stop"}            إنهاء الجلسة الحالية (يحسم الأخطاء المفتوحة ويرسل الملخص)
 //   {"cmd":"similar","s":2,"a":35}   متشابهات آية معيّنة (للوحة الجانبية)
+//   {"cmd":"listenStart","s":2,"a":35,"repeat":false}  تشغيل تسجيل الحصري المحلي
+//   {"cmd":"listenStop"}
 //   {"cmd":"quit"}
 // الإخراج (stdout، سطر JSON لكل حدث): load / ready / started / pos / chk / sim / near / level / ended / error
 // كل النصوص الموجهة للمستخدم عربية فصحى. الصوت لا يغادر الجهاز.
@@ -18,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { createTilawa } from "@tilawa/core/node";
 import { ayahsRecited } from "@tilawa/core";
+import { HusaryPlayback } from "./husary-playback.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // مجلد التطبيق (data/): بجانب المحرك في المستودع، أو يمرّره التطبيق لو المحرك منسوخ لمجلد المستخدم
@@ -106,6 +109,7 @@ function similarOf(s, a) { return (SIMILAR[`${s}:${a}`] || []).map(([k, score, r
 let tilawa = null;
 let historyPath = null;
 let run = null;             // الجلسة الجارية
+const husary = new HusaryPlayback({ emit, tilawa: () => tilawa });
 
 async function init(cmd) {
   historyPath = cmd.history || null;
@@ -260,13 +264,14 @@ function startRun(cmd) {
   };
 
   const onSamples = (f) => {
-    if (r.ended) return;
+    // Don’t let audio leaking from the speakers into the mic count as the learner.
+    if (r.ended || husary.blocksMic) return;
     r.audioMs += (f.length / 16000) * 1000;
     r.session.pushAudio(f, 16000).catch(() => {});
     if (r.shadow) r.shadow.pushAudio(f, 16000).catch(() => {});
   };
   let lastLevel = 0;
-  const onLevel = (db) => { const now = Date.now(); if (now - lastLevel > 120) { lastLevel = now; emit({ ev: "level", db: Math.round(db) }); } };
+  const onLevel = (db) => { if (husary.blocksMic) return; const now = Date.now(); if (now - lastLevel > 120) { lastLevel = now; emit({ ev: "level", db: Math.round(db) }); } };
   const onEnd = (why) => {
     if (why === "nomic") { fail("mic", "لم يُعثر على ميكروفون يعمل — تأكد من توصيله والسماح له ثم أعد المحاولة"); finishRun("nomic"); return; }
     if (why.startsWith("error")) { fail("audio", "تعذّر قراءة الصوت", { detail: why }); }
@@ -469,6 +474,8 @@ async function handle(cmd) {
     case "init": return init(cmd);
     case "start": return startRun(cmd);
     case "stop": return finishRun("stop");
+    case "listenStart": return husary.start(cmd.s, cmd.a, { repeat: cmd.repeat === true, speed:cmd.speed });
+    case "listenStop": return husary.stop();
     // «مسح الأخطاء» من اللوحة: الجلسة تستمر، والأخطاء السابقة لا تُحتسب في الملخص ولا تعود
     case "clearMistakes": {
       if (!run) return;
@@ -501,6 +508,7 @@ let shuttingDown = false;
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (husary.active) husary.stop();
   try { if (run) { finishRun("quit"); await new Promise((r) => setTimeout(r, 600)); } } catch {}
   try { tilawa && (await tilawa.dispose()); } catch {}
   process.exit(0);

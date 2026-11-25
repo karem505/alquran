@@ -20,6 +20,12 @@ Item {
     property bool fallbackFont: false // الخط غير متاح بعد
     property bool showOriginal: false // للمقارنة: الصورة الأصلية بلا رندرة
 
+    // قراءة الشيخ (السماع): أخضر مميَّز عن أصفر المستخدم وأسود المقروء — لا يلمس marks
+    property string listenAyah: ""    // "s:a" الآية التي يقرؤها الشيخ ("" = لا سماع)
+    property int listenW: 0           // رقم الكلمة الحالية (ترقيم Tilawa) داخل الآية
+    readonly property color listenColor: "#1B7A3A"
+    readonly property color listenDoneColor: "#3F7A55"
+
     property string tasmeeMark: ""    // "s:a" علامة «آخر تسميع»: الآية كلها بخلفية ذهبية خفيفة + شريطة في الهامش
     // أول سطر في الصفحة فيه آية العلامة (لموضع الشريطة)
     readonly property int markFirstLine: {
@@ -350,14 +356,30 @@ Item {
                         }
                         readonly property bool hidden: {
                             root.marksRev;
-                            if (!root.hideUnread) return false;
+                            if (!root.hideUnread || isLCur || isLDone) return false;
                             if (isEnd) return !root.readSet[root.key(wd[1], wd[2], 0)];
                             return !root.readSet[root.key(wd[1], wd[2], wd[4])];
                         }
 
+                        readonly property bool isLAyah: root.listenAyah !== "" && root.listenAyah === (wd[1] + ":" + wd[2])
+                        readonly property bool isLCur: isLAyah && !isEnd && root.listenW >= wd[3] && root.listenW <= wd[4]
+                        readonly property bool isLDone: isLAyah && !isEnd && wd[4] < root.listenW
+                        // خلفية الكلمة التي يقرؤها الشيخ (أخضر)
+                        Rectangle {
+                            visible: wordItem.isLCur
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: 2
+                            x: -4
+                            width: parent.width + 8
+                            height: parent.height * 0.86
+                            radius: 10
+                            color: "#331B7A3A"
+                            border.color: root.listenColor
+                            border.width: 1.6
+                        }
                         // خلفية الكلمة الحالية / الخطأ
                         Rectangle {
-                            visible: wordItem.isCur || wordItem.st >= 3
+                            visible: (wordItem.isCur && !wordItem.isLCur) || wordItem.st >= 3
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: 2
                             x: -4
@@ -417,7 +439,9 @@ Item {
                             text: wordItem.wd[0].replace(" ", "\u200A")
                             font.family: qfont.name
                             font.pixelSize: lineItem.fs
-                            color: wordItem.isCur ? root.curColor
+                            color: wordItem.isLCur ? root.listenColor
+                                 : wordItem.isLDone ? root.listenDoneColor
+                                 : wordItem.isCur ? root.curColor
                                  : wordItem.st === 3 ? root.wrongColor
                                  : wordItem.st === 4 ? root.missColor
                                  : wordItem.st === 5 ? root.skipColor

@@ -15,6 +15,94 @@ Item {
     property string fontsDir: ""
     readonly property int leftPage: rightPage + 1
 
+    // ---------- السماع (الشيخ الحصري) ----------
+    property bool listenPanelOpen: false       // اللوحة الجانبية تعرض مشغّل السماع بدل التسميع
+    property var selAyah: null                 // [سورة، آية] آية مختارة (من البحث) إن وُجدت
+    property int lSura: 1                      // اختيار المشغّل
+    property int lAyahNo: 1
+    property bool lRepeat: false
+    signal listenCloseRequested()
+    readonly property string listenHint: panel.hintText
+    // الآية/الكلمة التي يقرؤها الشيخ الآن (للتلوين الأخضر)
+    readonly property bool listenOn: engine ? engine.listening : false
+    property int listenReturnPage: 0
+    onListenOnChanged: {
+        if (listenOn && tv.active) listenReturnPage = tv.rightPage;
+        else if (!listenOn && listenReturnPage) {
+            var p = listenReturnPage;
+            listenReturnPage = 0;
+            if (tv.active && tv.rightPage !== p) tv.autoJump(p);
+        }
+    }
+    readonly property var lw: (listenOn && engine.listenWord) ? engine.listenWord : null
+    readonly property string listenAyahKey: lw ? (lw[0] + ":" + lw[1]) : ""
+    readonly property int listenWordNo: lw ? lw[2] : 0
+    function clampAyah(s, a) {
+        var n = tv.ayaCount(s);
+        return Math.max(1, Math.min(a, n > 0 ? n : a));
+    }
+    function pageStartAyah(p) {
+        if (!qdata || !qdata.ready) return null;
+        return tv.gToSA(qdata.pageStartG(Math.max(1, Math.min(604, p))));
+    }
+    function listenFromPage() {
+        var sa = tv.pageStartAyah(tv.rightPage);
+        if (sa) { tv.lSura = sa[0]; tv.lAyahNo = sa[1]; }
+    }
+    function listenPlay(s, a) {
+        if (!engine || !qdata || !qdata.ready) return;
+        s = Math.max(1, Math.min(114, s));
+        a = tv.clampAyah(s, a);
+        tv.lSura = s; tv.lAyahNo = a;
+        engine.listenStart(s, a, tv.lRepeat);
+    }
+    function listenStopNow() { if (engine) engine.listenStop(); }
+    function listenToggleSel() { if (tv.listenOn) tv.listenStopNow(); else tv.listenPlay(tv.lSura, tv.lAyahNo); }
+    // الآية السابقة/التالية (تعبر حدود السور)
+    function listenStep(d) {
+        if (!qdata || !qdata.ready) return;
+        var g = qdata.gi(tv.lSura, tv.lAyahNo) + d;
+        if (g < 0 || g >= qdata.totalAyas) return;
+        var sa = tv.gToSA(g);
+        if (tv.listenOn) tv.listenPlay(sa[0], sa[1]);
+        else { tv.lSura = sa[0]; tv.lAyahNo = sa[1]; }
+    }
+    function listenSetRepeat(on) {
+        tv.lRepeat = on;
+        if (tv.listenOn && engine.listenS > 0) tv.listenPlay(engine.listenS, engine.listenA);   // يسري فورًا
+    }
+    // زر P: من أول كلمة في آخر آية أكّدها المستخدم / الآية النشطة، وإلا الآية المختارة أو أول آية في الصفحة
+    function listenTarget() {
+        if (tv.listenPanelOpen) return [tv.lSura, tv.lAyahNo];
+        if (tv.active) {
+            if (tv.lastLockedKey) return [tv.lastLockedKey[0], tv.lastLockedKey[1]];
+            if (tv.pos && tv.pos.exp) return [tv.pos.exp[0], tv.pos.exp[1]];
+        }
+        if (tv.selAyah) return tv.selAyah;
+        return tv.pageStartAyah(tv.rightPage);
+    }
+    function listenSmart() {
+        var t = tv.listenTarget();
+        if (t) tv.listenPlay(t[0], t[1]);
+    }
+    onListenPanelOpenChanged: if (listenPanelOpen) {
+        if (tv.selAyah) { tv.lSura = tv.selAyah[0]; tv.lAyahNo = tv.selAyah[1]; }
+        else tv.listenFromPage();
+    }
+    Connections {
+        target: tv.engine
+        // يتابع الشيخ: الصفحة تتبع الكلمة، واختيار المشغّل يتبع الآية الجارية
+        function onListenWordChanged() {
+            var w = tv.engine.listenWord;
+            if (!w) return;
+            var p = tv.pageOfWord(w);
+            if (p < tv.rightPage || p > tv.leftPage) tv.autoJump(p);
+        }
+        function onListenAChanged() {
+            if (tv.engine.listening && tv.engine.listenS > 0) { tv.lSura = tv.engine.listenS; tv.lAyahNo = tv.engine.listenA; }
+        }
+    }
+
     signal jump(int page)
     signal exitRequested()
     signal clearClickRequested()               // IPC: محاكاة نقرة على زر «مسح الأخطاء»
@@ -87,7 +175,7 @@ Item {
     readonly property bool active: engine ? engine.sessionActive : false
 
     function key(s, a, w) { return s + ":" + a + ":" + w; }
-    function suraName(s) { return (qdata && qdata.ready) ? qdata.q.surahs[s - 1].name : ""; }
+    function suraName(s) { return (s >= 1 && s <= 114 && qdata && qdata.ready) ? qdata.q.surahs[s - 1].name : ""; }
     function ayaCount(s) { return (qdata && qdata.ready) ? qdata.q.surahs[s - 1].ayas : 0; }
     function clsName(c) {
         return c === "wrong_word" ? "كلمة خطأ" : c === "omitted_word" ? "كلمة ناقصة"
@@ -282,6 +370,7 @@ Item {
     property var pendingStart: null
     function startSession(src) {
         if (!tv.engine) return;
+        if (tv.engine.listening) tv.engine.listenStop();      // المستخدم بدأ تسميعه بنفسه
         if (!tv.engine.ready) { tv.pendingStart = src || "mic"; tv.engine.boot(); return; }
         tv.pendingStart = null;
         tv.resetSession();
@@ -335,7 +424,22 @@ Item {
         }
         return out;
     }
-    function pageOfWord(w) { return tv.pageOf(w[0], w[1]); }
+    function pageOfWord(w) {
+        var first = tv.pageOf(w[0], w[1]);
+        if (!tv.layout) return first;
+        for (var p = first; p <= Math.min(604, first + 2); p++) {
+            var lines = tv.layout.pages[p - 1].l;
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                if (!line || line.t !== "w") continue;
+                for (var j = 0; j < line.w.length; j++) {
+                    var g = line.w[j];
+                    if (g[1] === w[0] && g[2] === w[1] && g[3] > 0 && g[3] <= w[2] && w[2] <= g[4]) return p;
+                }
+            }
+        }
+        return first;
+    }
 
     function onEngineEvent(e) {
         var m, i, k;
@@ -412,8 +516,8 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
-        anchors.left: panel.right
-        anchors.leftMargin: 8
+        anchors.left: parent.left
+        anchors.leftMargin: tv.panelW + 20
 
         readonly property real gap: 14
         readonly property real pageAR: 0.6697
@@ -442,11 +546,13 @@ Item {
                 fontUrl: tv.fontUrl(tv.rightPage)
                 marks: tv.marks
                 marksRev: tv.marksRev
-                current: tv.current
+                current: tv.listenOn ? "" : tv.current
                 hideUnread: tv.hideUnread
                 readSet: tv.readSet
-                showOriginal: tv.showOriginal
+                showOriginal: tv.showOriginal && !tv.listenOn
                 tasmeeMark: tv.active ? "" : tv.lastMark
+                listenAyah: tv.listenAyahKey
+                listenW: tv.listenWordNo
                 onWordClicked: function (s, a, w) { if (tv.engine) tv.engine.similar(s, a); }
             }
         }
@@ -473,11 +579,13 @@ Item {
                 fontUrl: tv.fontUrl(tv.leftPage)
                 marks: tv.marks
                 marksRev: tv.marksRev
-                current: tv.current
+                current: tv.listenOn ? "" : tv.current
                 hideUnread: tv.hideUnread
                 readSet: tv.readSet
-                showOriginal: tv.showOriginal
+                showOriginal: tv.showOriginal && !tv.listenOn
                 tasmeeMark: tv.active ? "" : tv.lastMark
+                listenAyah: tv.listenAyahKey
+                listenW: tv.listenWordNo
                 onWordClicked: function (s, a, w) { if (tv.engine) tv.engine.similar(s, a); }
             }
         }
@@ -501,6 +609,28 @@ Item {
             anchors.topMargin: 6
         }
 
+        // شارة السماع أثناء التسميع (اللوحة الجانبية تبقى للتسميع) — P يوقف
+        Rectangle {
+            visible: tv.listenOn && !tv.listenPanelOpen
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: 4
+            z: 5
+            height: 28
+            width: badgeT.implicitWidth + 28
+            radius: 14
+            color: "#E4F1E7"
+            border.color: "#1B7A3A"
+            Text {
+                id: badgeT
+                anchors.centerIn: parent
+                color: "#1B5E2F"
+                font.family: T.fontUI
+                font.pixelSize: 13
+                text: tv.engine && tv.engine.listenSt === "indexing" ? "الشيخ الحصري — جارٍ تجهيز الفهرس…"
+                    : "الشيخ الحصري يقرأ " + (tv.engine ? tv.suraName(tv.engine.listenS) + " " + U.ar(tv.engine.listenA) : "") + " — P للإيقاف"
+            }
+        }
         // تقليب يدوي بالعجلة (خارج الجلسة أو أثناءها)
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
@@ -513,7 +643,7 @@ Item {
         // شاشة تحميل النموذج (أول مرة تنزيل ~٦٨ ميجابايت ثم من الذاكرة المحلية)
         Rectangle {
             anchors.fill: parent
-            visible: tv.engine && (tv.engine.loading || (!tv.engine.ready && tv.engine.error !== ""))
+            visible: tv.engine && !tv.listenPanelOpen && !tv.engine.listening && (tv.engine.loading || (!tv.engine.ready && tv.engine.error !== ""))
             color: Qt.rgba(0.93, 0.89, 0.82, 0.93)
             MouseArea { anchors.fill: parent }
             Column {
@@ -575,8 +705,21 @@ Item {
     }
 
     // ---------- اللوحة الجانبية ----------
+    ListenPanel {
+        id: listenPanel
+        visible: tv.listenPanelOpen
+        tv: tv
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.topMargin: 10
+        anchors.bottomMargin: 10
+        anchors.leftMargin: 12
+        width: tv.panelW
+    }
     TasmeePanel {
         id: panel
+        visible: !tv.listenPanelOpen
         tv: tv
         anchors.top: parent.top
         anchors.bottom: parent.bottom

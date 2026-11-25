@@ -15,6 +15,7 @@ ShellRoot {
         implicitWidth: Math.min(1760, screen ? screen.width - 24 : 1760)
         implicitHeight: Math.min(1080, screen ? screen.height - 48 : 1080)
         minimumSize: Qt.size(980, 640)
+        onVisibleChanged: if (!visible) tasmeeEngine.listenStop()
 
         Item {
             id: app
@@ -58,19 +59,60 @@ ShellRoot {
             // ---------- وضع التسميع ----------
             property bool tasmee: false
             property bool tasmeeLoaded: false
+            // مشغّل السماع الجانبي (الشيخ الحصري). لا يغيّر وضع القراءة الدائم: يُغلق فيعود ما كان
+            property bool listenOpen: false
+            function setListen(on) {
+                if (on === app.listenOpen) return;
+                if (on) {
+                    if (!app.pagesReady) return;
+                    app.listenOpen = true;
+                    app.tasmeeLoaded = true;
+                    app.fetchFonts([app.rightPage, app.rightPage + 1]);
+                    bulkFonts.running = true;
+                } else {
+                    app.listenOpen = false;
+                    tasmeeEngine.listenStop();
+                    if (!app.tasmee) reader.forceActiveFocus();
+                }
+            }
+            // زر P: يوقف إن كان الشيخ يقرأ، وإلا يبدأ من الموضع المناسب (دون بدء تلقائي عند الفتح)
+            function listenToggle() {
+                if (tasmeeEngine.listening) { tasmeeEngine.listenStop(); return; }
+                if (!data.ready || !app.pagesReady) return;
+                if (!app.tasmee && !app.listenOpen) app.setListen(true);
+                if (tasmeeView.item) tasmeeView.item.listenSmart();
+            }
+            function listenAt(s, a) {
+                if (!data.ready || !app.pagesReady) return;
+                if (!app.tasmee && !app.listenOpen) app.setListen(true);
+                if (tasmeeView.item) tasmeeView.item.listenPlay(s, a);
+            }
+            function listenStateObj() {
+                var v = tasmeeView.item;
+                return { open: app.listenOpen, tasmee: app.tasmee, st: tasmeeEngine.listenSt, s: tasmeeEngine.listenS,
+                    a: tasmeeEngine.listenA, msg: tasmeeEngine.listenMsg, word: tasmeeEngine.listenWord,
+                    page: app.rightPage, repeat: v ? v.lRepeat : false, sel: v ? [v.lSura, v.lAyahNo] : null,
+                    tasmeeActive: tasmeeEngine.sessionActive, pending: tasmeeEngine.pendingListen !== null,
+                    hold: v ? v.userHold : false, cur: v ? v.current : "" };
+            }
             // خطوط QPC V2: بجانب المشروع في التطوير، أو بجانب الصفحات في التركيب النظامي
             readonly property string fontsDir: app.pagesMode === "DEV" ? app.appDir + "/fonts/qpc-v2"
                                               : String(app.pagesDir).replace(/\/pages$/, "") + "/qpc-v2"
             function setTasmee(on) {
                 if (on && !app.pagesReady) return;
+                if (app.listenOpen) {            // تبديل الوضع: يتوقف السماع وتعود لوحة التسميع
+                    app.listenOpen = false;
+                    tasmeeEngine.listenStop();
+                }
                 app.tasmee = on;
                 if (on) {
                     app.tasmeeLoaded = true;
                     tasmeeEngine.boot();
                     app.fetchFonts([app.rightPage, app.rightPage + 1]);
                     bulkFonts.running = true;
-                } else if (tasmeeEngine.sessionActive) {
-                    tasmeeEngine.stop();
+                } else {
+                    tasmeeEngine.listenStop();
+                    if (tasmeeEngine.sessionActive) tasmeeEngine.stop();
                 }
                 if (!on) reader.forceActiveFocus();
             }
@@ -160,7 +202,7 @@ ShellRoot {
             }
             onRightPageChanged: {
                 saveTimer.restart();
-                if (app.tasmee) app.fetchFonts([app.rightPage, app.rightPage + 1]);
+                if (app.tasmee || app.listenOpen) app.fetchFonts([app.rightPage, app.rightPage + 1]);
             }
             onBookmarksChanged: saveTimer.restart()
 
@@ -232,11 +274,14 @@ ShellRoot {
                 onAddBookmark: app.toggleBookmark()
                 tasmeeOn: app.tasmee
                 onToggleTasmee: app.setTasmee(!app.tasmee)
+                listenOn: app.listenOpen
+                listenBusy: tasmeeEngine.listening
+                onToggleListen: app.setListen(!app.listenOpen)
             }
 
             ReaderView {
                 id: reader
-                visible: !app.tasmee
+                visible: !app.tasmee && !app.listenOpen
                 anchors.top: header.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -255,7 +300,7 @@ ShellRoot {
             Loader {
                 id: tasmeeView
                 active: app.tasmeeLoaded
-                visible: app.tasmee
+                visible: app.tasmee || app.listenOpen
                 anchors.top: header.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -266,6 +311,9 @@ ShellRoot {
                     rightPage: app.rightPage
                     pagesDir: app.pagesDir
                     fontsDir: app.fontsDir
+                    listenPanelOpen: app.listenOpen
+                    selAyah: app.found ? [app.found.s, app.found.a] : null
+                    onListenCloseRequested: app.setListen(false)
                     lastMark: app.tasmeeMark ? app.tasmeeMark.s + ":" + app.tasmeeMark.a : ""
                     onJump: function (page) { app.rightPage = app.clampRight(page); }
                     onExitRequested: app.setTasmee(false)
@@ -355,6 +403,13 @@ ShellRoot {
                 function tasmeeFile(segments: string): void {
                     if (tasmeeView.item) tasmeeView.item.startSession({ segments: JSON.parse(segments), realtime: true });
                 }
+                // ---- السماع (الشيخ الحصري) ----
+                function listenToggle(): void { app.listenToggle(); }
+                function listenAt(sura: int, aya: int): void { app.listenAt(sura, aya); }
+                function listenStop(): void { tasmeeEngine.listenStop(); }
+                function listenOpen(on: bool): void { app.setListen(on); }
+                function listenHint(): string { return tasmeeView.item ? tasmeeView.item.listenHint : ""; }
+                function listenState(): string { return JSON.stringify(app.listenStateObj()); }
                 function tasmeeStop(): void { tasmeeEngine.stop(); }
                 // نفس مسار النقر على زر «مسح الأخطاء» (النقرة الأولى تطلب التأكيد والثانية تمسح)
                 function tasmeeClearClick(): void { if (tasmeeView.item) tasmeeView.item.clearClickRequested(); }
@@ -413,6 +468,21 @@ ShellRoot {
                 Timer { id: toastTimer; interval: 2300; onTriggered: toast.opacity = 0 }
             }
 
+            // ---------- P: تشغيل/إيقاف السماع ----------
+            // لا يعمل داخل حقول الكتابة (البحث…) ولا مع التكرار الآلي للمفتاح ولا مع مفاتيح التعديل.
+            // مفتاح P الفعلي (مسح 33 في xkb) يعمل أيضًا مع التخطيط العربي
+            function isTextFocus() {
+                var f = win.activeFocusItem;
+                return !!f && (f.cursorPosition !== undefined || f.inputMethodComposing !== undefined);
+            }
+            Keys.onPressed: function (ev) {
+                var isP = ev.key === Qt.Key_P || ev.nativeScanCode === 33;
+                if (!isP || ev.isAutoRepeat || (ev.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) return;
+                if (app.isTextFocus() || search.visible || nav.visible || !app.pagesReady) return;
+                ev.accepted = true;
+                app.listenToggle();
+            }
+
             // ---------- اختصارات ----------
             Shortcut { sequence: "Ctrl+F"; onActivated: search.open() }
             Shortcut { sequence: "Ctrl+G"; onActivated: nav.open() }
@@ -424,6 +494,7 @@ ShellRoot {
                 onActivated: {
                     if (search.visible) search.close();
                     else if (nav.visible) nav.close();
+                    else if (app.listenOpen) app.setListen(false);
                     else if (app.tasmee && !tasmeeEngine.sessionActive) app.setTasmee(false);
                 }
             }
