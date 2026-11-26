@@ -1,13 +1,17 @@
 # Maintainer: Karem Shohoud <karem@ailigent.ai>
 pkgname=alquran
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
-pkgdesc="Quran reader for desktop — Madinah Mushaf (Uthmani script), two-page spread, Arabic search, bookmarks and full index"
+pkgdesc="Quran reader for desktop — Madinah Mushaf (Uthmani script), offline recitation check (tasmee), Husary recitation with word-by-word highlighting"
 arch=('any')
 url="https://github.com/karem505/alquran"
 license=('MIT')
 depends=('quickshell')
-optdepends=('ttf-qurancomplex-fonts: خطوط مجمع الملك فهد لعرض أجمل للواجهة')
+optdepends=('ttf-qurancomplex-fonts: خطوط مجمع الملك فهد لعرض أجمل للواجهة'
+            'nodejs: وضع التسميع والسماع من تسجيلات الحصري'
+            'npm: تجهيز محرك التسميع أول مرة'
+            'mpv: السماع من تسجيلات الحصري'
+            'ffmpeg: فهرسة تسجيلات الحصري')
 options=(!strip)
 
 source=("$pkgname-$pkgver.tar.gz::https://github.com/karem505/alquran/archive/v$pkgver.tar.gz")
@@ -15,7 +19,13 @@ sha256sums=('81f396cc8e463ac7890b2171187cb44156de102b3077ee2311f5f1d22840ed35')
 
 package() {
   install -dm755 "$pkgdir/usr/share/$pkgname"
-  cp -r "$srcdir/$pkgname-$pkgver"/{shell.qml,Data.qml,DownloadView.qml,HeaderBar.qml,NavMenu.qml,ReaderView.qml,SearchPanel.qml,theme.js,utils.js,assets,data,tools} "$pkgdir/usr/share/$pkgname/"
+  cd "$srcdir/$pkgname-$pkgver"
+  cp -r ./*.qml theme.js utils.js assets data tools "$pkgdir/usr/share/$pkgname/"
+  # محرك Node (التسميع والسماع) بلا الاختبارات؛ الحزم تُثبَّت عند المستخدم بـ tools/setup-tasmee.sh
+  install -d "$pkgdir/usr/share/$pkgname/engine/tools"
+  install -m644 engine/*.mjs engine/package.json engine/package-lock.json "$pkgdir/usr/share/$pkgname/engine/"
+  install -m644 engine/tools/*.mjs "$pkgdir/usr/share/$pkgname/engine/tools/"
+  cd "$srcdir"
 
   install -Dm644 "$srcdir/$pkgname-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$srcdir/$pkgname-$pkgver/assets/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
@@ -34,12 +44,12 @@ Type=Application
 Name=القرآن الكريم
 Name[en]=Al-Quran
 GenericName=Quran Reader
-Comment=مصحف المدينة النبوية بالرسم العثماني — صفحتان متجاورتان، بحث وعلامات حفظ
+Comment=مصحف المدينة النبوية بالرسم العثماني — تسميع، وسماع الحصري مع تظليل الكلمات، بحث وعلامات حفظ
 Exec=alquran
 Icon=alquran
 Terminal=false
 Categories=Education;Literature;Religion;
-Keywords=Quran;Qur'an;قرآن;القرآن;مصحف;الرسم العثماني;
+Keywords=Quran;Qur'an;Husary;قرآن;القرآن;مصحف;الرسم العثماني;تسميع;الحصري;تلاوة;
 StartupWMClass=alquran
 StartupNotify=true
 EOF

@@ -14,7 +14,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync, unlinkSync, openSync, fsyncSync, closeSync } from "node:fs";
 import { homedir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export const defaultLibrary = process.env.MUSHAFI_REF_AUDIO ? resolve(process.env.MUSHAFI_REF_AUDIO) : join(homedir(), "side projects", "قرآن");
 export const defaultIndexDir = process.env.MUSHAFI_HUSARY_INDEX ? resolve(process.env.MUSHAFI_HUSARY_INDEX) : join(homedir(), ".local", "share", "alquran", "husary-index");
@@ -83,6 +83,23 @@ export function writeTrackIndex(track, indexDir, data) {
   atomicWrite(trackFile(track, indexDir), { schema: SCHEMA, number: track.number, from: track.from, to: track.to, fingerprint: fp(track), leadMs: LEAD_MS, ...data });
 }
 
+// ───── المكمّل: مقاطع من طبعة كاملة لنفس الختمة تحلّ محلّ مواضع القطع في التسجيل المحلي ─────
+// supplement.json = {schema, zones:[{track, fingerprint, fromMs, toMs, segments:[{key,file,startMs,endMs,words}]}]}
+// المنطقة تبدأ وتنتهي عند بدايتين مؤكدتين في التسجيل المحلي، وكل مقطع مؤكد بالمحاذاة في ملف المكمّل.
+export const defaultSupplementFile = process.env.MUSHAFI_HUSARY_SUPPLEMENT ? resolve(process.env.MUSHAFI_HUSARY_SUPPLEMENT) : join(homedir(), ".local", "share", "alquran", "husary-supplement", "supplement.json");
+export function readSupplement(tracks, file = defaultSupplementFile) {
+  const d = load(file);
+  if (!d || d.schema !== SCHEMA || !Array.isArray(d.zones)) return { zones: [] };
+  const byNumber = new Map(tracks.map(t => [t.number, t])), base = dirname(file);
+  const zones = d.zones.map(z => ({ ...z, segments: (z.segments || []).map(g => ({ ...g, file: isAbsolute(g.file) ? g.file : join(base, g.file) })) }))
+    .filter(z => {
+    const t = byNumber.get(z.track);
+    return t && fpOk(t, z.fingerprint) && z.toMs > z.fromMs && Array.isArray(z.segments) && z.segments.length
+      && z.segments.every(g => g.endMs > g.startMs && Array.isArray(g.words) && existsSync(g.file));
+  });
+  return { zones };
+}
+
 export function readTrack(track, indexDir = defaultIndexDir) {
   const d = load(trackFile(track, indexDir));
   if (!d || d.schema !== SCHEMA || !fpOk(track, d.fingerprint) || !Array.isArray(d.words)) return null;
@@ -97,7 +114,20 @@ export function readTrack(track, indexDir = defaultIndexDir) {
     d.words.sort((a,b) => a[0] - b[0]);
     d.ayahsVerified = Object.keys(d.starts).length;
   }
+  d.words = consistentWords(d.words, d.starts);
   return d;
+}
+
+// A word labelled with an ayah whose start is verified must lie between that start and the next
+// verified start in time. The first pass occasionally kept stray labels from a wrong lock
+// (e.g. 15:8 words 6 s before its start); highlighting them would jump to the wrong ayah.
+export function consistentWords(words, starts) {
+  const byTime = Object.entries(starts).sort((x, y) => x[1] - y[1]);
+  const bound = new Map(byTime.map(([k, v], i) => [k, [v, byTime[i + 1]?.[1] ?? Infinity]]));
+  return words.filter(([ms, s, a]) => {
+    const b = bound.get(`${s}:${a}`);
+    return !b || (ms >= b[0] - 5 && ms < b[1]);
+  });
 }
 
 // For a missed lock (e.g. basmala or disjointed letters): certify an isolated clip
@@ -265,6 +295,21 @@ async function verifyOne(track, tilawa, c, startMs, durationMs, signal) {
   return { ok: true };
 }
 
+// Keep the pool bounded and wait for in-flight work before closing the model.
+export async function boundedMap(items, limit, fn, signal) {
+  if (![1, 2].includes(limit)) throw new RangeError("worker count must be 1 or 2");
+  let next = 0, failure;
+  await Promise.all(Array.from({length: Math.min(limit, items.length)}, async () => {
+    while (!failure && next < items.length) {
+      const i = next++;
+      try { signal?.throwIfAborted(); await fn(items[i], i); }
+      catch (error) { failure ??= error; }
+    }
+  }));
+  if (failure) throw failure;
+  signal?.throwIfAborted();
+}
+
 export async function indexTrack(track, indexDir = defaultIndexDir, options = {}) {
   mkdirSync(indexDir, { recursive: true });
   const { signal, limitMs, target } = options;
@@ -288,7 +333,7 @@ export async function indexTrack(track, indexDir = defaultIndexDir, options = {}
   finally { try { unlinkSync(lock); } catch {} }
 }
 
-async function indexTrackLocked(track, indexDir, { tilawa, signal, limitMs = null, checkpointMs = 60000, onCheckpoint, onProgress } = {}) {
+async function indexTrackLocked(track, indexDir, { tilawa, signal, limitMs = null, checkpointMs = 60000, onCheckpoint, onProgress, verifyJobs = 1 } = {}) {
   mkdirSync(indexDir, { recursive: true });
   const prev = readTrack(track, indexDir);
   if (prev?.complete && limitMs == null) return { ...prev, skipped: true };
@@ -306,20 +351,25 @@ async function indexTrackLocked(track, indexDir, { tilawa, signal, limitMs = nul
     let vr = load(vf);
     if (!vr || vr.schema !== SCHEMA || !fpOk(track, vr.fingerprint) || vr.leadMs !== LEAD_MS || vr.limitMs !== lim) vr = { schema: SCHEMA, fingerprint: fp(track), leadMs: LEAD_MS, limitMs: lim, results: {} };
     const starts = {};
-    let n = 0;
+    let n = 0, checked = 0;
+    try {
+      await boundedMap(cands, verifyJobs, async c => {
+        const k = `${c.s}:${c.a}`;
+        let r = vr.results[k];
+        if (!r || r.eventMs !== c.ms) {
+          const est = Math.max(0, c.ms - LEAD_MS);
+          r = { eventMs: c.ms, startMs: est, ...(await verifyOne(track, tilawa, c, est, durationMs, signal)) };
+          vr.results[k] = r;
+          if (++n % 10 === 0) atomicWrite(vf, vr);
+        }
+        onProgress?.({ k, ok: r.ok, done: ++checked, total: cands.length });
+      }, signal);
+    } finally { atomicWrite(vf, vr); }
     for (const c of cands) {
       const k = `${c.s}:${c.a}`;
-      const est = Math.max(0, c.ms - LEAD_MS);
-      let r = vr.results[k];
-      if (!r || r.eventMs !== c.ms) {
-        r = { eventMs: c.ms, startMs: est, ...(await verifyOne(track, tilawa, c, est, durationMs, signal)) };
-        vr.results[k] = r;
-        if (++n % 10 === 0) atomicWrite(vf, vr);
-      }
+      const r = vr.results[k];
       if (r.ok) starts[k] = r.startMs; else gaps.push({ s: c.s, a: c.a, reason: r.reason, eventMs: c.ms });
-      onProgress?.({ k, ok: r.ok, done: Object.keys(vr.results).length, total: cands.length });
     }
-    atomicWrite(vf, vr);
     gaps.sort((x, y) => ordinal(x.s, x.a) - ordinal(y.s, y.a));
     const words = p1.words.map(([ms, s, a, w]) => (w === 1 && starts[`${s}:${a}`] != null && ms === vr.results[`${s}:${a}`]?.eventMs ? [starts[`${s}:${a}`], s, a, w] : [ms, s, a, w]));
     const complete = lim == null;
@@ -330,7 +380,7 @@ async function indexTrackLocked(track, indexDir, { tilawa, signal, limitMs = nul
   } finally { if (own) await tilawa.dispose(); }
 }
 
-export function coverage(tracks, indexDir = defaultIndexDir) {
+export function coverage(tracks, indexDir = defaultIndexDir, supplementFile = defaultSupplementFile) {
   const have = new Set(), gaps = [];
   let done = 0;
   for (const t of tracks) {
@@ -340,5 +390,11 @@ export function coverage(tracks, indexDir = defaultIndexDir) {
     for (const k of Object.keys(ix.starts)) have.add(k);
     for (const g of ix.gaps) gaps.push({ track: t.number, ...g });
   }
-  return { tracksTotal: tracks.length, tracksComplete: done, ayahsWithStart: have.size, totalAyahs: TOTAL_AYAHS, gaps };
+  const supplemented = new Set();
+  for (const z of readSupplement(tracks, supplementFile).zones)
+    for (const g of z.segments) if (/^\d+:\d+$/.test(g.key) && !have.has(g.key)) supplemented.add(g.key);
+  // an ayah listed as a gap in one recording may be verified in the overlapping one
+  const open = gaps.filter(g => !supplemented.has(`${g.s}:${g.a}`) && !have.has(`${g.s}:${g.a}`));
+  return { tracksTotal: tracks.length, tracksComplete: done, ayahsWithStart: have.size, ayahsSupplemented: supplemented.size,
+    ayahsPlayable: have.size + supplemented.size, totalAyahs: TOTAL_AYAHS, gaps: open };
 }

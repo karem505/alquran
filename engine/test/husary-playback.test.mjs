@@ -81,3 +81,41 @@ test('unconfirmed ayah never plays an estimated or nearby verse', async () => {
   assert.deepEqual(played, []);
   assert.equal(events.at(-1).st, 'error');
 });
+
+// A recording with an edit cut: 1:3 opens with missing words. The repair zone swaps the
+// local audio between the verified starts of 1:2 and 1:4 for the complete page edition.
+function cutFixture() {
+  const calls = [];
+  const local = {...track, to: [1, 4]};
+  const data = {words: [[100,1,1,1],[800,1,2,1],[1200,1,3,4],[1500,1,4,1]], durationMs: 2000, complete: true};
+  const zone = {track: 1, fromMs: 800, toMs: 1500, segments: [
+    {key:'1:2', file:'/supp/p1.mp3', startMs:5000, endMs:7000, words:[[5000,1,2,1]]},
+    {key:'1:3', file:'/supp/p1.mp3', startMs:7000, endMs:9000, words:[[7000,1,3,1],[7600,1,3,2]]}]};
+  const f = fixture({player: async ({file, startMs, stopMs, endMs, tick, signal}) => {
+    calls.push({file, startMs, stopMs, endMs}); tick(startMs); await delay(5, null, {signal}); }});
+  f.library.scanLibrary = () => [local];
+  f.library.readTrack = () => data;
+  f.library.indexTrack = () => assert.fail('a supplemented ayah must not trigger re-indexing');
+  f.library.readSupplement = () => ({zones: [zone]});
+  return {...f, calls};
+}
+test('ayah missing from the local recording plays from the supplement, then resumes locally after the cut', async () => {
+  const {playback, calls, events} = cutFixture();
+  await playback.start(1, 3);
+  assert.deepEqual(calls, [
+    {file:'/supp/p1.mp3', startMs:7000, stopMs:9000, endMs:undefined},
+    {file:'/offline/example.mp3', startMs:1500, stopMs:undefined, endMs:undefined}]);
+  assert.deepEqual(events.filter(e => e.ev === 'listenWord').map(e => e.w), [[1,3,1],[1,4,1]]);
+  assert.equal(events.at(-1).st, 'stopped');
+});
+test('local playback stops before a cut and plays the complete ayat from the supplement', async () => {
+  const {playback, calls} = cutFixture();
+  await playback.start(1, 1);
+  assert.deepEqual(calls.map(c => [c.file, c.startMs, c.stopMs]), [
+    ['/offline/example.mp3', 100, 800], ['/supp/p1.mp3', 5000, 9000], ['/offline/example.mp3', 1500, undefined]]);
+});
+test('repeating a supplemented ayah loops its supplement segment', async () => {
+  const {playback, calls} = cutFixture();
+  await playback.start(1, 3, {repeat: true});
+  assert.deepEqual(calls, [{file:'/supp/p1.mp3', startMs:7000, stopMs:undefined, endMs:9000}]);
+});

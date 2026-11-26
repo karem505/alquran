@@ -105,6 +105,72 @@ test("readTrack overlays a certified clip without losing the rest of the track",
   } finally { rmSync(lib,{recursive:true}); rmSync(idx,{recursive:true}); }
 });
 
+test("stray word labels outside their verified ayah span are dropped", async () => {
+  const {consistentWords} = await import("../husary-index.mjs");
+  const words = [[500,1,2,1],[1000,1,1,1],[1400,1,1,2],[2000,1,2,1],[2600,1,2,2],[3100,1,1,3],[3200,1,3,1]];
+  assert.deepEqual(consistentWords(words, {"1:1":1000,"1:2":2000}),
+    [[1000,1,1,1],[1400,1,1,2],[2000,1,2,1],[2600,1,2,2],[3200,1,3,1]]);
+});
+
+test("index bundle moves to another machine only for byte-identical recordings", async () => {
+  const lib = mk(), idx = mk(), out = mk(), idx2 = mk();
+  try {
+    const name = "01 - سورة الفاتحة من الآية (1) حتى الآية (7).mp3";
+    writeFileSync(join(lib, name), "audio-bytes");
+    const {writeTrackIndex} = await import("../husary-index.mjs");
+    const {exportBundle, importBundle} = await import("../husary-bundle.mjs");
+    const [t] = scanLibrary(lib);
+    writeTrackIndex(t, idx, {words:[[1000,1,1,1]], starts:{"1:1":1000}, gaps:[], complete:true, durationMs:9000});
+    await exportBundle([t], out, {indexDir: idx, supplementFile: join(idx, "none.json")});
+    utimesSync(join(lib, name), new Date(), new Date(Date.now() - 86400e3));   // another machine: other mtime
+    const [moved] = scanLibrary(lib);
+    assert.equal(readTrack(moved, idx), null);                                    // old fingerprint no longer fits
+    const r = await importBundle([moved], out, {indexDir: idx2, supplementFile: join(idx2, "s.json")});
+    assert.equal(r.imported, 1);
+    assert.equal(findAyah(readTrack(moved, idx2), 1, 1), 1000);
+    writeFileSync(join(lib, name), "other-bytes");                               // same size, different audio
+    const [other] = scanLibrary(lib);
+    const r2 = await importBundle([other], out, {indexDir: mk(), supplementFile: join(idx2, "s2.json")});
+    assert.deepEqual([r2.imported, r2.skipped[0].why], [0, "different recording (size/md5)"]);
+  } finally { for (const d of [lib, idx, out, idx2]) rmSync(d, {recursive:true}); }
+});
+
+test("supplement zones count as playable only for the matching recording and existing files", async () => {
+  const lib = mk(), idx = mk();
+  try {
+    writeFileSync(join(lib, "01 - سورة الفاتحة من الآية (1) حتى الآية (7).mp3"), "abc");
+    const [t] = scanLibrary(lib);
+    const {writeTrackIndex, readSupplement, coverage} = await import("../husary-index.mjs");
+    writeTrackIndex(t, idx, {words:[[1000,1,1,1],[3000,1,3,1]], starts:{"1:1":1000,"1:3":3000},
+      gaps:[{s:1,a:2,reason:"word1-not-observed"}], complete:true, durationMs:9000});
+    const page = join(lib, "page-001.mp3"); writeFileSync(page, "x");
+    const zone = (fingerprint, file) => ({track:1, fingerprint, fromMs:1000, toMs:3000,
+      segments:[{key:"1:1",file,startMs:0,endMs:900,words:[[0,1,1,1]]},{key:"1:2",file,startMs:900,endMs:2000,words:[[900,1,2,1]]}]});
+    const good = {size:t.size, mtimeMs:t.mtimeMs}, sup = join(idx, "supplement.json");
+    writeFileSync(sup, JSON.stringify({schema:1, zones:[zone(good, page), zone({size:1, mtimeMs:1}, page), zone(good, join(lib,"gone.mp3"))]}));
+    assert.equal(readSupplement([t], sup).zones.length, 1);
+    const c = coverage([t], idx, sup);
+    assert.deepEqual([c.ayahsWithStart, c.ayahsSupplemented, c.ayahsPlayable, c.gaps.length], [2, 1, 3, 0]);
+  } finally { rmSync(lib,{recursive:true}); rmSync(idx,{recursive:true}); }
+});
+
+test("parallel CLI plans two independent workers and rejects nested concurrency", async () => {
+  const {spawnSync} = await import("node:child_process");
+  const {fileURLToPath} = await import("node:url");
+  const tool = fileURLToPath(new URL("../tools/index-husary.mjs", import.meta.url));
+  const idx = mk();
+  try {
+    const run = args => spawnSync(process.execPath, [tool, "--index",idx,...args], {encoding:"utf8"});
+    const bad = run(["--jobs", "2", "--verify-jobs","2","--status"]);
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /--jobs/);
+    const dry = run(["--jobs","2","--tracks","1,11","--dry-run"]);
+    assert.equal(dry.status, 0);
+    assert.match(dry.stdout, /process 1: 1\b/);
+    assert.match(dry.stdout, /process 2: 11\b/);
+  } finally { rmSync(idx,{recursive:true}); }
+});
+
 const real = FAST ? { skip: "HUSARY_FAST" } : { timeout: 600000 };
 // حدود بداية الآيات المقاسة بكشف الصمت (ffmpeg silencedetect) على المسار 1، بالثواني
 const SILENCE_ONSET = { "1:3": 11.07, "1:4": 13.67, "1:5": 16.33, "1:6": 20.86, "1:7": 24.22, "2:2": 46.48 };
