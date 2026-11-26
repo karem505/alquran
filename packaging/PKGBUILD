@@ -15,7 +15,7 @@ optdepends=('ttf-qurancomplex-fonts: خطوط مجمع الملك فهد لعر�
 options=(!strip)
 
 source=("$pkgname-$pkgver.tar.gz::https://github.com/karem505/alquran/archive/v$pkgver.tar.gz")
-sha256sums=('81f396cc8e463ac7890b2171187cb44156de102b3077ee2311f5f1d22840ed35')
+sha256sums=('a12cc03ab26dce2be8d06e3ed0050d16b437bc0545477c8bd7e88a69c6173145')
 
 package() {
   install -dm755 "$pkgdir/usr/share/$pkgname"
